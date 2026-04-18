@@ -1,28 +1,200 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- ✅ SUPABASE CDN -->
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<!-- ✅ NO CDN — Native fetch() based Supabase client (file:// protocol compatible) -->
 <script>
 // ============================================================
-// SUPABASE CONFIG — Anon key yahan paste karo
+// SUPABASE CONFIG
 // ============================================================
 const SUPABASE_URL = 'https://kwackgbsnonlkghqhqop.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_smvuZWu3CIswWErLlxDFUg_GIWEM83c';
-const db = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+// ✅ LIGHTWEIGHT SUPABASE CLIENT — No CDN, No postMessage, No DataCloneError
+// Direct fetch() use karta hai — file:// aur https:// dono pe kaam karta hai
+const db = (function() {
+    const BASE = SUPABASE_URL + '/rest/v1';
+    const AUTH = SUPABASE_URL + '/auth/v1';
+    const HEADERS = {
+        'apikey': SUPABASE_ANON_KEY,
+        'Authorization': 'Bearer ' + SUPABASE_ANON_KEY,
+        'Content-Type': 'application/json',
+        'Prefer': 'return=representation'
+    };
+
+    function buildUrl(table, params) {
+        let url = BASE + '/' + table;
+        if(params && Object.keys(params).length) {
+            url += '?' + Object.entries(params).map(([k,v]) => k + '=' + encodeURIComponent(v)).join('&');
+        }
+        return url;
+    }
+
+    async function req(method, url, body, extraHeaders) {
+        try {
+            const opts = {
+                method,
+                headers: Object.assign({}, HEADERS, extraHeaders || {})
+            };
+            if(body !== undefined) opts.body = JSON.stringify(body);
+            const res = await fetch(url, opts);
+            let data = null;
+            try { data = await res.json(); } catch(e) { data = null; }
+            if(!res.ok) return { data: null, error: { message: (data && (data.message || data.hint || data.details)) || ('HTTP ' + res.status), code: res.status } };
+            return { data, error: null };
+        } catch(e) {
+            return { data: null, error: { message: e.message || 'Network error', code: 'NETWORK_ERROR' } };
+        }
+    }
+
+    // QueryBuilder — chainable .select .eq .order .single .maybeSingle .insert .update .delete .upsert
+    function QueryBuilder(table) {
+        this._table = table;
+        this._select = '*';
+        this._filters = [];
+        this._order = null;
+        this._limit = null;
+        this._single = false;
+        this._maybeSingle = false;
+        this._method = 'GET';
+        this._body = undefined;
+        this._upsertOnConflict = null;
+        this._prefer = null;
+    }
+    QueryBuilder.prototype.select = function(cols) { this._select = cols || '*'; return this; };
+    QueryBuilder.prototype.eq = function(col, val) { this._filters.push(col + '=eq.' + val); return this; };
+    QueryBuilder.prototype.neq = function(col, val) { this._filters.push(col + '=neq.' + val); return this; };
+    QueryBuilder.prototype.order = function(col, opts) {
+        this._order = col + (opts && opts.ascending === false ? '.desc' : '.asc');
+        return this;
+    };
+    QueryBuilder.prototype.limit = function(n) { this._limit = n; return this; };
+    QueryBuilder.prototype.single = function() { this._single = true; return this; };
+    QueryBuilder.prototype.maybeSingle = function() { this._maybeSingle = true; return this; };
+
+    QueryBuilder.prototype._buildGetUrl = function() {
+        let params = 'select=' + this._select;
+        if(this._filters.length) params += '&' + this._filters.join('&');
+        if(this._order) params += '&order=' + this._order;
+        if(this._limit) params += '&limit=' + this._limit;
+        return BASE + '/' + this._table + '?' + params;
+    };
+
+    QueryBuilder.prototype.then = function(resolve, reject) {
+        const self = this;
+        let p;
+        if(self._method === 'GET') {
+            let extraH = {};
+            if(self._single) extraH['Accept'] = 'application/vnd.pgrst.object+json';
+            p = req('GET', self._buildGetUrl(), undefined, extraH).then(function(r) {
+                if(self._maybeSingle && r.data && Array.isArray(r.data)) {
+                    return { data: r.data[0] || null, error: null };
+                }
+                return r;
+            });
+        } else if(self._method === 'INSERT') {
+            let extraH = { 'Prefer': 'return=representation' };
+            p = req('POST', BASE + '/' + self._table, self._body, extraH);
+        } else if(self._method === 'UPDATE') {
+            let url = BASE + '/' + self._table;
+            if(self._filters.length) url += '?' + self._filters.join('&');
+            p = req('PATCH', url, self._body, { 'Prefer': 'return=representation' });
+        } else if(self._method === 'DELETE') {
+            let url = BASE + '/' + self._table;
+            if(self._filters.length) url += '?' + self._filters.join('&');
+            p = req('DELETE', url, undefined, { 'Prefer': 'return=representation' });
+        } else if(self._method === 'UPSERT') {
+            let prefer = 'return=representation,resolution=merge-duplicates';
+            let url = BASE + '/' + self._table;
+            if(self._upsertOnConflict) url += '?on_conflict=' + encodeURIComponent(self._upsertOnConflict);
+            p = req('POST', url, self._body, { 'Prefer': prefer });
+        }
+        return p.then(resolve, reject);
+    };
+
+    // from(table) returns chainable object with insert/update/delete/upsert/select
+    function from(table) {
+        const qb = new QueryBuilder(table);
+
+        const wrap = {
+            select: function(cols) { qb.select(cols); return wrap; },
+            eq: function(col, val) { qb.eq(col, val); return wrap; },
+            neq: function(col, val) { qb.neq(col, val); return wrap; },
+            order: function(col, opts) { qb.order(col, opts); return wrap; },
+            limit: function(n) { qb.limit(n); return wrap; },
+            single: function() { qb.single(); return wrap; },
+            maybeSingle: function() { qb.maybeSingle(); return wrap; },
+            then: function(res, rej) { return qb.then(res, rej); },
+            insert: function(rows, opts) {
+                const q2 = new QueryBuilder(table);
+                q2._method = 'INSERT';
+                q2._body = Array.isArray(rows) ? rows : [rows];
+                const w2 = {
+                    select: function() { return w2; },
+                    single: function() { q2._single = true; return w2; },
+                    then: function(res, rej) { return q2.then(res, rej); }
+                };
+                return w2;
+            },
+            update: function(data) {
+                qb._method = 'UPDATE'; qb._body = data; return wrap;
+            },
+            delete: function() {
+                qb._method = 'DELETE'; return wrap;
+            },
+            upsert: function(data, opts) {
+                const q2 = new QueryBuilder(table);
+                q2._method = 'UPSERT';
+                q2._body = Array.isArray(data) ? data : [data];
+                if(opts && opts.onConflict) q2._upsertOnConflict = opts.onConflict;
+                const w2 = {
+                    then: function(res, rej) { return q2.then(res, rej); }
+                };
+                return w2;
+            }
+        };
+        return wrap;
+    }
+
+    // settings table upsert helper (used heavily in app)
+    async function rpc(fn, params) {
+        try {
+            const res = await fetch(SUPABASE_URL + '/rest/v1/rpc/' + fn, {
+                method: 'POST',
+                headers: HEADERS,
+                body: JSON.stringify(params || {})
+            });
+            const data = await res.json();
+            return { data, error: res.ok ? null : { message: data.message || 'RPC error' } };
+        } catch(e) {
+            return { data: null, error: { message: e.message } };
+        }
+    }
+
+    return { from, rpc };
+})();
+
 // ⚠️ REMINDER: Supabase dashboard mein RLS (Row Level Security) enable rakho
-// Anon key frontend-visible hai — RLS off hone par koi bhi data access kar sakta hai
-// Dashboard → Authentication → Policies → Tables par RLS enable karo
 
 // ============================================================
 // SUPABASE HELPER FUNCTIONS
 // ============================================================
 
+// ✅ SAFE SUPABASE QUERY WRAPPER — DataCloneError (mobile/file://) aur table-missing handle karta hai
+async function sbSafeQuery(queryFn) {
+    try {
+        const result = await queryFn();
+        return result;
+    } catch(e) {
+        console.log('sbSafeQuery: fetch error:', e.message || e);
+        return { data: null, error: { message: e.message || 'fetch failed', code: 'CLIENT_ERROR' } };
+    }
+}
+
 // Products - Supabase se load karo
 async function sbLoadProducts() {
     try {
-        const { data, error } = await db.from('products').select('*').order('id');
-        if(error) throw error;
+        const { data, error } = await sbSafeQuery(() => db.from('products').select('*').order('id'));
+        if(error) throw new Error(error.message);
         if(data && data.length > 0) {
             products = data.map(p => ({
                 id: p.id,
@@ -106,13 +278,12 @@ async function sbDeleteProduct(id) {
 // Orders - Supabase se load karo
 async function sbLoadOrders() {
     try {
-        const { data, error } = await db.from('orders').select('*').order('created_at', {ascending: false});
-        if(error) throw error;
+        const { data, error } = await sbSafeQuery(() => db.from('orders').select('*').order('created_at', {ascending: false}));
+        if(error) throw new Error(error.message);
         if(data && data.length > 0) {
             orders = data.map(o => ({
                 id: o.id,
                 userId: o.user_email,
-                // ✅ FIX: customerName/Phone/Address Supabase se map karo
                 customerName: o.customer_name || o.user_email || 'N/A',
                 customerPhone: o.customer_phone || '',
                 customerAddress: o.customer_address || '',
@@ -175,7 +346,7 @@ async function sbSaveBill(bill) {
     try {
         const row = {
             bill_no: bill.billNo,
-            order_id: bill.orderId,
+            order_id: typeof bill.orderId === 'number' ? bill.orderId : parseInt(bill.orderId) || bill.orderId,
             date: bill.date || new Date().toISOString(),
             customer_name: bill.customerName || '',
             customer_phone: bill.customerPhone || '',
@@ -188,8 +359,8 @@ async function sbSaveBill(bill) {
             status: bill.status || 'Pending',
             admin_note: bill.adminNote || ''
         };
-        const { data: existing } = await db.from('bills').select('id').eq('order_id', bill.orderId).maybeSingle();
-        if (existing) {
+        const { data: existing, error: existErr } = await db.from('bills').select('id').eq('order_id', typeof bill.orderId === 'number' ? bill.orderId : parseInt(bill.orderId) || bill.orderId).maybeSingle();
+        if (existing && !existErr) {
             await db.from('bills').update(row).eq('order_id', bill.orderId);
         } else {
             await db.from('bills').insert([row]);
@@ -201,9 +372,30 @@ async function sbSaveBill(bill) {
 }
 
 async function sbLoadBills() {
+    // ✅ FIX: bills table optional hai — agar exist nahi karta toh silently localStorage use karo
     try {
-        const { data, error } = await db.from('bills').select('*').order('date', {ascending: false});
-        if (error) throw error;
+        let result;
+        try {
+            result = await db.from('bills').select('*').order('date', {ascending: false});
+        } catch(fetchErr) {
+            // DataCloneError ya network error — silently fallback
+            console.log('sbLoadBills: Supabase fetch skipped, localStorage use hoga.');
+            let bl = localStorage.getItem('nexdrop_bills');
+            if (bl) bills = JSON.parse(bl);
+            return;
+        }
+        const { data, error } = result;
+        // Table missing (42P01) ya koi aur DB error — silently skip
+        if (error) {
+            if (error.code === '42P01' || (error.message && error.message.includes('does not exist'))) {
+                console.log('sbLoadBills: bills table nahi hai — localStorage fallback.');
+            } else {
+                console.log('sbLoadBills error:', error.message);
+            }
+            let bl = localStorage.getItem('nexdrop_bills');
+            if (bl) bills = JSON.parse(bl);
+            return;
+        }
         if (data && data.length > 0) {
             bills = data.map(b => ({
                 billNo: b.bill_no,
@@ -222,11 +414,18 @@ async function sbLoadBills() {
             }));
             localStorage.setItem('nexdrop_bills', JSON.stringify(bills));
             console.log('✅ ' + bills.length + ' bills Supabase se load hue!');
+        } else {
+            // Supabase mein koi bills nahi — localStorage check karo
+            let bl = localStorage.getItem('nexdrop_bills');
+            if (bl) bills = JSON.parse(bl);
         }
     } catch(e) {
-        console.log('sbLoadBills error, localStorage fallback use karo:', e.message);
-        let bl = localStorage.getItem('nexdrop_bills');
-        if (bl) bills = JSON.parse(bl);
+        // Any other unexpected error — silent fallback
+        console.log('sbLoadBills unexpected error, localStorage use hoga:', e.message || e);
+        try {
+            let bl = localStorage.getItem('nexdrop_bills');
+            if (bl) bills = JSON.parse(bl);
+        } catch(le) {}
     }
 }
 
@@ -258,8 +457,8 @@ async function sbSaveDealership(enquiry) {
 
 async function sbLoadDealership() {
     try {
-        const { data, error } = await db.from('dealership_enquiries').select('*').order('date', {ascending: false});
-        if (error) throw error;
+        const { data, error } = await sbSafeQuery(() => db.from('dealership_enquiries').select('*').order('date', {ascending: false}));
+        if (error) { throw new Error(error.message); }
         if (data && data.length > 0) {
             dealershipEnquiries = data.map(d => ({
                 id: parseInt(d.enquiry_id) || d.enquiry_id,
@@ -270,6 +469,9 @@ async function sbLoadDealership() {
             }));
             localStorage.setItem('nexdrop_dealership', JSON.stringify(dealershipEnquiries));
             console.log('✅ ' + dealershipEnquiries.length + ' dealership enquiries Supabase se load hue!');
+        } else {
+            let d = localStorage.getItem('nexdrop_dealership');
+            if (d) dealershipEnquiries = JSON.parse(d);
         }
     } catch(e) {
         console.log('sbLoadDealership error, localStorage fallback:', e.message);
@@ -308,8 +510,8 @@ async function sbSaveBulkEnquiry(enquiry) {
 
 async function sbLoadBulkEnquiries() {
     try {
-        const { data, error } = await db.from('bulk_enquiries').select('*').order('date', {ascending: false});
-        if (error) throw error;
+        const { data, error } = await sbSafeQuery(() => db.from('bulk_enquiries').select('*').order('date', {ascending: false}));
+        if (error) { throw new Error(error.message); }
         if (data && data.length > 0) {
             bulkEnquiries = data.map(b => ({
                 id: parseInt(b.enquiry_id) || b.enquiry_id,
@@ -319,6 +521,9 @@ async function sbLoadBulkEnquiries() {
             }));
             localStorage.setItem('nexdrop_bulk', JSON.stringify(bulkEnquiries));
             console.log('✅ ' + bulkEnquiries.length + ' bulk enquiries Supabase se load hue!');
+        } else {
+            let b = localStorage.getItem('nexdrop_bulk');
+            if (b) bulkEnquiries = JSON.parse(b);
         }
     } catch(e) {
         console.log('sbLoadBulkEnquiries error, localStorage fallback:', e.message);
@@ -330,8 +535,8 @@ async function sbLoadBulkEnquiries() {
 
 async function sbLoadUsers() {
     try {
-        const { data, error } = await db.from('users').select('*').order('created_at', {ascending: false});
-        if(error) throw error;
+        const { data, error } = await sbSafeQuery(() => db.from('users').select('*').order('created_at', {ascending: false}));
+        if(error) throw new Error(error.message);
         if(data && data.length > 0) {
             users = data.map(u => ({
                 name: u.name,
@@ -340,7 +545,6 @@ async function sbLoadUsers() {
                 address: u.address || '',
                 password: u.password || '',
                 loyaltyPoints: u.loyalty_points || 0,
-                // ✅ FIX: GSTIN aur state load karo
                 gstin: u.gstin || '',
                 stateCode: u.state_code || '',
                 registeredAt: u.created_at,
@@ -417,11 +621,12 @@ async function initSupabase() {
         sbLoadProducts(),
         sbLoadOrders(),
         sbLoadUsers(),
+        sbLoadBills(),           // ✅ FIX: Bills Supabase se load karo (was missing!)
         sbLoadDealership(),      // ✅ FIX 2: Dealership Supabase se load
         sbLoadBulkEnquiries()    // ✅ FIX 3: Bulk enquiries Supabase se load
     ]);
-    // LocalStorage se baaki data load karo
-    let bl = localStorage.getItem('nexdrop_bills'); if(bl) bills = JSON.parse(bl);
+    // LocalStorage se baaki data load karo (fallback agar Supabase me nahi hai)
+    let bl = localStorage.getItem('nexdrop_bills'); if(!bills || !bills.length) { if(bl) bills = JSON.parse(bl); }
     let b2 = localStorage.getItem('nexdrop_b2b'); if(b2) b2bProducts = JSON.parse(b2); // ✅ FIX 4: B2B localStorage (Supabase fallback via saveB2B)
     let s = localStorage.getItem('nexdrop_settings'); if(s) settings = {...settings, ...JSON.parse(s)};
     let cu = localStorage.getItem('nexdrop_user'); if(cu) currentUser = JSON.parse(cu);
@@ -504,7 +709,8 @@ async function hashPassword(password) {
 }
 // Verify karo: hashed ya plain text dono support karo (backward compat)
 async function verifyPassword(entered, stored) {
-    if(!stored) return true; // No password set — allow
+    // ⚠️ Note: Agar stored password blank/null hai to access DENY karo (security fix)
+    if(!stored || stored.trim() === '') return false;
     if(stored.startsWith('sha256:')) {
         let enteredHash = await hashPassword(entered);
         return enteredHash === stored;
@@ -2255,6 +2461,8 @@ body.dark-mode .nav-links { background: #121a18 !important; }
 
 <!-- ===================== DISTRIBUTOR DASHBOARD ===================== -->
 <div id="distributorDashboard" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:#f5f0ea;z-index:3000;overflow-y:auto;">
+
+  <!-- Header -->
   <div style="background:linear-gradient(135deg,#2c5a4a,#1e3f34);padding:0.8rem 1rem;display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;z-index:10;">
     <div>
       <div style="color:#c49a6c;font-size:0.72rem;font-weight:700;letter-spacing:1px;">NEXDROP MART</div>
@@ -2266,73 +2474,153 @@ body.dark-mode .nav-links { background: #121a18 !important; }
     </div>
   </div>
 
-  <div style="max-width:700px;margin:1.2rem auto;padding:0 0.8rem;">
+  <!-- Tab Navigation -->
+  <div style="background:white;border-bottom:1px solid #eee;padding:0 0.5rem;display:flex;gap:0;overflow-x:auto;position:sticky;top:52px;z-index:9;">
+    <button onclick="distShowTab('home')" id="distTab_home" style="flex:none;padding:0.7rem 0.9rem;border:none;background:none;font-size:0.75rem;font-weight:700;color:#2c5a4a;border-bottom:3px solid #2c5a4a;cursor:pointer;">🏠 Home</button>
+    <button onclick="distShowTab('catalog')" id="distTab_catalog" style="flex:none;padding:0.7rem 0.9rem;border:none;background:none;font-size:0.75rem;font-weight:600;color:#888;border-bottom:3px solid transparent;cursor:pointer;">📦 Catalog</button>
+    <button onclick="distShowTab('order')" id="distTab_order" style="flex:none;padding:0.7rem 0.9rem;border:none;background:none;font-size:0.75rem;font-weight:600;color:#888;border-bottom:3px solid transparent;cursor:pointer;">🛒 Order</button>
+    <button onclick="distShowTab('history')" id="distTab_history" style="flex:none;padding:0.7rem 0.9rem;border:none;background:none;font-size:0.75rem;font-weight:600;color:#888;border-bottom:3px solid transparent;cursor:pointer;">📋 History</button>
+    <button onclick="distShowTab('profile')" id="distTab_profile" style="flex:none;padding:0.7rem 0.9rem;border:none;background:none;font-size:0.75rem;font-weight:600;color:#888;border-bottom:3px solid transparent;cursor:pointer;">👤 Profile</button>
+  </div>
 
-    <!-- Profile Card -->
-    <div style="background:white;border-radius:16px;padding:1rem 1.2rem;margin-bottom:1rem;box-shadow:0 2px 12px rgba(0,0,0,0.07);">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem;">
-        <h4 style="margin:0;color:#2c5a4a;">👤 My Profile</h4>
-        <span id="distDashStatus" style="font-size:0.72rem;padding:3px 10px;border-radius:20px;font-weight:700;"></span>
+  <div style="max-width:700px;margin:0 auto;padding:1rem 0.8rem 2rem;">
+
+    <!-- ===== TAB: HOME ===== -->
+    <div id="distTabContent_home">
+
+      <!-- Notice from Admin -->
+      <div id="distNoticeBox" style="display:none;background:linear-gradient(135deg,#fff8ee,#f5e8cc);border-radius:16px;padding:1rem 1.2rem;margin-bottom:1rem;box-shadow:0 2px 12px rgba(0,0,0,0.07);border:1px solid #c49a6c;">
+        <h4 style="margin:0 0 0.4rem;color:#c49a6c;font-size:0.9rem;">📢 Notice from Nexdrop</h4>
+        <div id="distNoticeText" style="font-size:0.85rem;color:#555;line-height:1.6;"></div>
       </div>
-      <div id="distDashProfile" style="font-size:0.82rem;color:#555;line-height:1.9;"></div>
-    </div>
 
-    <!-- Stats Row -->
-    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:0.7rem;margin-bottom:1rem;">
-      <div style="background:white;border-radius:14px;padding:0.9rem;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,0.06);">
-        <div style="font-size:1.5rem;">📦</div>
-        <div id="distStatOrders" style="font-size:1.3rem;font-weight:800;color:#2c5a4a;">0</div>
-        <div style="font-size:0.68rem;color:#888;">Orders</div>
+      <!-- Stats Row -->
+      <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:0.7rem;margin-bottom:1rem;">
+        <div style="background:white;border-radius:14px;padding:1rem;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,0.06);">
+          <div style="font-size:1.6rem;">📦</div>
+          <div id="distStatOrders" style="font-size:1.5rem;font-weight:800;color:#2c5a4a;">0</div>
+          <div style="font-size:0.7rem;color:#888;">Total Orders</div>
+        </div>
+        <div style="background:white;border-radius:14px;padding:1rem;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,0.06);">
+          <div style="font-size:1.6rem;">💰</div>
+          <div id="distStatAmount" style="font-size:1.5rem;font-weight:800;color:#2c5a4a;">₹0</div>
+          <div style="font-size:0.7rem;color:#888;">Total Business</div>
+        </div>
+        <div style="background:white;border-radius:14px;padding:1rem;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,0.06);">
+          <div style="font-size:1.6rem;">⏳</div>
+          <div id="distStatPending" style="font-size:1.5rem;font-weight:800;color:#e67e22;">0</div>
+          <div style="font-size:0.7rem;color:#888;">Pending Orders</div>
+        </div>
+        <div style="background:white;border-radius:14px;padding:1rem;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,0.06);">
+          <div style="font-size:1.6rem;">✅</div>
+          <div id="distStatDelivered" style="font-size:1.5rem;font-weight:800;color:#27ae60;">0</div>
+          <div style="font-size:0.7rem;color:#888;">Delivered</div>
+        </div>
       </div>
-      <div style="background:white;border-radius:14px;padding:0.9rem;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,0.06);">
-        <div style="font-size:1.5rem;">💰</div>
-        <div id="distStatAmount" style="font-size:1.3rem;font-weight:800;color:#2c5a4a;">₹0</div>
-        <div style="font-size:0.68rem;color:#888;">Total Spent</div>
+
+      <!-- Quick Actions -->
+      <div style="background:white;border-radius:16px;padding:1rem 1.2rem;margin-bottom:1rem;box-shadow:0 2px 12px rgba(0,0,0,0.07);">
+        <h4 style="margin:0 0 0.8rem;color:#2c5a4a;font-size:0.95rem;">⚡ Quick Actions</h4>
+        <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:0.6rem;">
+          <button onclick="distShowTab('order')" style="background:linear-gradient(135deg,#2c5a4a,#3d7a65);color:white;border:none;padding:0.8rem;border-radius:12px;font-size:0.8rem;font-weight:700;cursor:pointer;">🛒 Place Order</button>
+          <button onclick="distShowTab('catalog')" style="background:linear-gradient(135deg,#c49a6c,#a07840);color:white;border:none;padding:0.8rem;border-radius:12px;font-size:0.8rem;font-weight:700;cursor:pointer;">📦 View Catalog</button>
+          <button onclick="distShowTab('history')" style="background:linear-gradient(135deg,#3498db,#2471a3);color:white;border:none;padding:0.8rem;border-radius:12px;font-size:0.8rem;font-weight:700;cursor:pointer;">📋 Order History</button>
+          <button onclick="distContactAdmin()" style="background:linear-gradient(135deg,#25D366,#1a9e4c);color:white;border:none;padding:0.8rem;border-radius:12px;font-size:0.8rem;font-weight:700;cursor:pointer;">💬 Contact Admin</button>
+        </div>
       </div>
-      <div style="background:white;border-radius:14px;padding:0.9rem;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,0.06);">
-        <div style="font-size:1.5rem;">⭐</div>
-        <div id="distStatPending" style="font-size:1.3rem;font-weight:800;color:#e67e22;">0</div>
-        <div style="font-size:0.68rem;color:#888;">Pending</div>
+
+      <!-- Recent Orders -->
+      <div style="background:white;border-radius:16px;padding:1rem 1.2rem;box-shadow:0 2px 12px rgba(0,0,0,0.07);">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.8rem;">
+          <h4 style="margin:0;color:#2c5a4a;font-size:0.95rem;">🕐 Recent Orders</h4>
+          <button onclick="distShowTab('history')" style="background:none;border:none;color:#c49a6c;font-size:0.75rem;font-weight:700;cursor:pointer;">View All →</button>
+        </div>
+        <div id="distRecentOrders" style="font-size:0.82rem;color:#999;text-align:center;padding:0.8rem 0;">Loading...</div>
       </div>
     </div>
 
-    <!-- My Orders -->
-    <div style="background:white;border-radius:16px;padding:1rem 1.2rem;margin-bottom:1rem;box-shadow:0 2px 12px rgba(0,0,0,0.07);">
-      <h4 style="margin:0 0 0.8rem;color:#2c5a4a;">📋 My Orders</h4>
-      <div id="distDashOrders" style="font-size:0.82rem;color:#999;text-align:center;padding:1rem 0;">No orders yet.</div>
+    <!-- ===== TAB: CATALOG ===== -->
+    <div id="distTabContent_catalog" style="display:none;">
+      <div style="background:white;border-radius:16px;padding:1rem 1.2rem;box-shadow:0 2px 12px rgba(0,0,0,0.07);">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.8rem;">
+          <h4 style="margin:0;color:#2c5a4a;font-size:0.95rem;">📦 Wholesale Product Catalog</h4>
+          <button onclick="distLoadProductCatalog()" style="background:#f5f0ea;border:none;padding:4px 10px;border-radius:8px;font-size:0.72rem;color:#2c5a4a;cursor:pointer;">🔄 Refresh</button>
+        </div>
+        <!-- Category Filter -->
+        <div id="distCatFilter" style="display:flex;gap:0.4rem;overflow-x:auto;margin-bottom:0.8rem;padding-bottom:0.3rem;"></div>
+        <div id="distProductCatalog" style="font-size:0.82rem;color:#999;text-align:center;padding:1rem 0;">Loading products...</div>
+      </div>
     </div>
 
-    <!-- Change Password -->
-    <div style="background:white;border-radius:16px;padding:1rem 1.2rem;box-shadow:0 2px 12px rgba(0,0,0,0.07);">
-      <h4 style="margin:0 0 0.8rem;color:#2c5a4a;">🔑 Change Password</h4>
-      <input type="password" id="distChgOld" placeholder="Current Password" style="margin-bottom:0.5rem;">
-      <input type="password" id="distChgNew" placeholder="New Password" style="margin-bottom:0.5rem;">
-      <input type="password" id="distChgNew2" placeholder="Confirm New Password" style="margin-bottom:0.8rem;">
-      <button onclick="distChangePassword()" style="background:linear-gradient(135deg,#2c5a4a,#c49a6c);color:white;border:none;padding:0.6rem 1.4rem;border-radius:10px;font-weight:700;font-size:0.85rem;cursor:pointer;">Update Password</button>
+    <!-- ===== TAB: ORDER ===== -->
+    <div id="distTabContent_order" style="display:none;">
+      <div style="background:white;border-radius:16px;padding:1rem 1.2rem;box-shadow:0 2px 12px rgba(0,0,0,0.07);">
+        <h4 style="margin:0 0 0.8rem;color:#2c5a4a;font-size:0.95rem;">🛒 Place Wholesale Order</h4>
+        <p style="font-size:0.75rem;color:#888;margin-bottom:0.8rem;">Product select karke quantity fill karein, phir WhatsApp se order confirm karein.</p>
+        <label style="font-size:0.78rem;font-weight:700;color:#555;">Select Product</label>
+        <select id="distOrderProduct" style="width:100%;padding:0.65rem 0.8rem;border:1px solid #ddd;border-radius:10px;font-size:0.88rem;background:white;margin:0.3rem 0 0.6rem;box-sizing:border-box;">
+          <option value="">-- Select Product --</option>
+        </select>
+        <!-- Selected product info -->
+        <div id="distSelectedProductInfo" style="display:none;background:#f5f9f7;border-radius:10px;padding:0.6rem 0.8rem;margin-bottom:0.6rem;font-size:0.8rem;color:#2c5a4a;"></div>
+        <label style="font-size:0.78rem;font-weight:700;color:#555;">Quantity</label>
+        <input type="number" id="distOrderQty" placeholder="Quantity (e.g. 10 kg)" min="1" style="margin:0.3rem 0 0.6rem;width:100%;padding:0.65rem 0.8rem;border:1px solid #ddd;border-radius:10px;font-size:0.88rem;box-sizing:border-box;">
+        <label style="font-size:0.78rem;font-weight:700;color:#555;">Delivery Address</label>
+        <input type="text" id="distOrderAddress" placeholder="Delivery address" style="margin:0.3rem 0 0.6rem;width:100%;padding:0.65rem 0.8rem;border:1px solid #ddd;border-radius:10px;font-size:0.88rem;box-sizing:border-box;">
+        <label style="font-size:0.78rem;font-weight:700;color:#555;">Special Note (Optional)</label>
+        <textarea id="distOrderNote" rows="2" placeholder="Special requirements / note" style="margin:0.3rem 0 0.8rem;width:100%;padding:0.65rem 0.8rem;border:1px solid #ddd;border-radius:10px;font-size:0.85rem;resize:none;box-sizing:border-box;"></textarea>
+        <!-- Order Summary -->
+        <div id="distOrderSummary" style="display:none;background:#f5f9f7;border-radius:10px;padding:0.8rem;margin-bottom:0.8rem;font-size:0.82rem;"></div>
+        <button onclick="distPlaceOrder()" style="background:linear-gradient(135deg,#2c5a4a,#c49a6c);color:white;border:none;padding:0.75rem;width:100%;border-radius:12px;font-weight:700;font-size:0.95rem;cursor:pointer;">📲 Send Order via WhatsApp</button>
+        <p style="font-size:0.7rem;color:#aaa;text-align:center;margin-top:0.5rem;">Order WhatsApp par jayega, admin confirm karega</p>
+      </div>
     </div>
 
-    <!-- Notices from Admin -->
-    <div id="distNoticeBox" style="display:none;background:linear-gradient(135deg,#fff8ee,#f5e8cc);border-radius:16px;padding:1rem 1.2rem;box-shadow:0 2px 12px rgba(0,0,0,0.07);border:1px solid #c49a6c;">
-      <h4 style="margin:0 0 0.6rem;color:#c49a6c;">📢 Notice from Nexdrop</h4>
-      <div id="distNoticeText" style="font-size:0.85rem;color:#555;line-height:1.6;"></div>
+    <!-- ===== TAB: ORDER HISTORY ===== -->
+    <div id="distTabContent_history" style="display:none;">
+      <div style="background:white;border-radius:16px;padding:1rem 1.2rem;box-shadow:0 2px 12px rgba(0,0,0,0.07);">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.8rem;">
+          <h4 style="margin:0;color:#2c5a4a;font-size:0.95rem;">📋 Order History</h4>
+          <button onclick="distLoadOrderHistory()" style="background:#f5f0ea;border:none;padding:4px 10px;border-radius:8px;font-size:0.72rem;color:#2c5a4a;cursor:pointer;">🔄 Refresh</button>
+        </div>
+        <!-- Status Filter -->
+        <div style="display:flex;gap:0.4rem;margin-bottom:0.8rem;flex-wrap:wrap;">
+          <button onclick="distFilterOrders('all')" id="distOrdFilterAll" style="padding:4px 12px;border-radius:20px;border:none;background:#2c5a4a;color:white;font-size:0.72rem;cursor:pointer;">All</button>
+          <button onclick="distFilterOrders('pending')" id="distOrdFilterPending" style="padding:4px 12px;border-radius:20px;border:1px solid #ddd;background:white;color:#555;font-size:0.72rem;cursor:pointer;">⏳ Pending</button>
+          <button onclick="distFilterOrders('shipped')" id="distOrdFilterShipped" style="padding:4px 12px;border-radius:20px;border:1px solid #ddd;background:white;color:#555;font-size:0.72rem;cursor:pointer;">🚚 Shipped</button>
+          <button onclick="distFilterOrders('delivered')" id="distOrdFilterDelivered" style="padding:4px 12px;border-radius:20px;border:1px solid #ddd;background:white;color:#555;font-size:0.72rem;cursor:pointer;">✅ Delivered</button>
+        </div>
+        <div id="distDashOrders" style="font-size:0.82rem;color:#999;text-align:center;padding:1rem 0;">Loading orders...</div>
+      </div>
     </div>
 
-    <!-- Wholesale Product Catalog -->
-    <div style="background:white;border-radius:16px;padding:1rem 1.2rem;box-shadow:0 2px 12px rgba(0,0,0,0.07);">
-      <h4 style="margin:0 0 0.8rem;color:#2c5a4a;">📦 Wholesale Product Catalog</h4>
-      <div id="distProductCatalog" style="font-size:0.82rem;color:#999;text-align:center;padding:1rem 0;">Loading products...</div>
-    </div>
+    <!-- ===== TAB: PROFILE ===== -->
+    <div id="distTabContent_profile" style="display:none;">
+      <!-- Profile Info -->
+      <div style="background:white;border-radius:16px;padding:1rem 1.2rem;margin-bottom:1rem;box-shadow:0 2px 12px rgba(0,0,0,0.07);">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.8rem;">
+          <h4 style="margin:0;color:#2c5a4a;font-size:0.95rem;">👤 My Profile</h4>
+          <span id="distDashStatus" style="font-size:0.72rem;padding:3px 10px;border-radius:20px;font-weight:700;"></span>
+        </div>
+        <div id="distDashProfile" style="font-size:0.83rem;color:#555;line-height:2;"></div>
+        <!-- WhatsApp Contact -->
+        <button onclick="distContactAdmin()" style="margin-top:0.8rem;background:#25D366;color:white;border:none;padding:0.6rem 1.2rem;border-radius:10px;font-weight:700;font-size:0.82rem;cursor:pointer;width:100%;">💬 Contact Admin on WhatsApp</button>
+      </div>
 
-    <!-- Place Order -->
-    <div style="background:white;border-radius:16px;padding:1rem 1.2rem;margin-bottom:1.5rem;box-shadow:0 2px 12px rgba(0,0,0,0.07);">
-      <h4 style="margin:0 0 0.8rem;color:#2c5a4a;">🛒 Place Wholesale Order</h4>
-      <p style="font-size:0.75rem;color:#888;margin-bottom:0.8rem;">Product select karke quantity fill karein, phir WhatsApp se order confirm karein.</p>
-      <select id="distOrderProduct" style="width:100%;padding:0.65rem 0.8rem;border:1px solid #ddd;border-radius:10px;font-size:0.88rem;background:white;margin-bottom:0.6rem;">
-        <option value="">-- Select Product --</option>
-      </select>
-      <input type="number" id="distOrderQty" placeholder="Quantity (e.g. 10 kg)" min="1" style="margin-bottom:0.6rem;">
-      <textarea id="distOrderNote" rows="2" placeholder="Special requirements / note (optional)" style="margin-bottom:0.8rem;width:100%;padding:0.65rem 0.8rem;border:1px solid #ddd;border-radius:10px;font-size:0.85rem;resize:none;box-sizing:border-box;"></textarea>
-      <button onclick="distPlaceOrder()" style="background:linear-gradient(135deg,#2c5a4a,#c49a6c);color:white;border:none;padding:0.75rem;width:100%;border-radius:12px;font-weight:700;font-size:0.95rem;cursor:pointer;">📲 Send Order via WhatsApp</button>
+      <!-- Change Password -->
+      <div style="background:white;border-radius:16px;padding:1rem 1.2rem;margin-bottom:1rem;box-shadow:0 2px 12px rgba(0,0,0,0.07);">
+        <h4 style="margin:0 0 0.8rem;color:#2c5a4a;font-size:0.95rem;">🔑 Change Password</h4>
+        <input type="password" id="distChgOld" placeholder="Current Password" style="margin-bottom:0.5rem;width:100%;padding:0.65rem 0.8rem;border:1px solid #ddd;border-radius:10px;font-size:0.88rem;box-sizing:border-box;">
+        <input type="password" id="distChgNew" placeholder="New Password" style="margin-bottom:0.5rem;width:100%;padding:0.65rem 0.8rem;border:1px solid #ddd;border-radius:10px;font-size:0.88rem;box-sizing:border-box;">
+        <input type="password" id="distChgNew2" placeholder="Confirm New Password" style="margin-bottom:0.8rem;width:100%;padding:0.65rem 0.8rem;border:1px solid #ddd;border-radius:10px;font-size:0.88rem;box-sizing:border-box;">
+        <button onclick="distChangePassword()" style="background:linear-gradient(135deg,#2c5a4a,#c49a6c);color:white;border:none;padding:0.65rem 1.4rem;border-radius:10px;font-weight:700;font-size:0.85rem;cursor:pointer;">Update Password</button>
+      </div>
+
+      <!-- Monthly Summary -->
+      <div style="background:white;border-radius:16px;padding:1rem 1.2rem;box-shadow:0 2px 12px rgba(0,0,0,0.07);">
+        <h4 style="margin:0 0 0.8rem;color:#2c5a4a;font-size:0.95rem;">📊 Monthly Summary</h4>
+        <div id="distMonthlySummary" style="font-size:0.82rem;color:#999;text-align:center;padding:0.5rem 0;">Loading...</div>
+      </div>
     </div>
 
   </div>
@@ -5420,7 +5708,7 @@ function showUserPassMsg(text, color) {
     setTimeout(() => { el.style.display = 'none'; }, 4000);
 }
 function loadDashboard() {
-    document.getElementById('userInfo').innerHTML = `<p>👤 <strong>${currentUser.name}</strong></p><p>✉️ ${currentUser.email}</p><p>📞 ${currentUser.phone}</p><p>📍 ${currentUser.address}</p>`;
+    document.getElementById('userInfo').innerHTML = `<p>👤 <strong>${currentUser.name}</strong></p><p>✉️ ${currentUser.email}</p><p>📞 ${currentUser.phone}</p><p>📍 ${currentUser.address}</p>${currentUser.gstin ? `<p style="font-size:0.78rem;color:#7b1fa2;">🏢 GSTIN: <strong>${currentUser.gstin}</strong>${currentUser.stateCode ? ' &nbsp;|&nbsp; State Code: <strong>' + currentUser.stateCode + '</strong>' : ''}</p>` : ''}`;
     let userOrders = orders.filter(o => o.userId === currentUser.email);
     let totalSpent = userOrders.filter(o=>o.status!=='Cancelled').reduce((s,o)=>{ let t=typeof o.total==='number'?o.total:parseInt(String(o.total).replace(/[₹,]/g,''))||0; return s+t; },0);
     let delivered = userOrders.filter(o=>o.status==='Delivered').length;
@@ -5972,7 +6260,10 @@ function saveSingleB2B(id) {
     if(gst !== undefined && gst !== '') p.gstSlab = parseFloat(gst) || 5;
     if(disc !== undefined && disc !== '') p.discount = parseFloat(disc) || 0;
     saveB2B();
+    loadAdminB2B();
+    displayB2B();
     refreshStockDashboard();
+    updateStats();
     showToast(`✅ ${p.name} saved!`, '#2c5a4a');
 }
 
@@ -6447,7 +6738,25 @@ function clearUserFilter() {
     let dt = document.getElementById('userDateTo'); if(dt) dt.value='';
     loadAdminUsers();
 }
-function loadBulkList() { let html = ''; for(let e of bulkEnquiries) html += `<div style="background:#f5f0ea; padding:0.5rem; border-radius:8px; margin-bottom:0.5rem;"><strong>${e.name}</strong> - ${e.product}<br>📞 ${e.phone}<br>📊 ${e.quantity}<br>📅 ${e.date}</div>`; document.getElementById('bulkList').innerHTML = html || '<p>No enquiries</p>'; }
+function loadBulkList() {
+    let html = '';
+    for(let e of bulkEnquiries) {
+        let sc = e.status === 'Contacted' ? '#2196f3' : e.status === 'Closed' ? '#ff4444' : '#4caf50';
+        html += `<div style="background:#f5f0ea;padding:0.6rem 0.8rem;border-radius:8px;margin-bottom:0.5rem;border:1px solid #e0d8d0;font-size:0.78rem;">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:0.4rem;flex-wrap:wrap;">
+                <div>
+                    <div style="font-weight:700;">${e.name} <span style="color:#888;font-size:0.7rem;">· ${e.product||'—'}</span></div>
+                    <div style="color:#888;">📞 ${e.phone} &nbsp;|&nbsp; 📊 ${e.quantity||'—'}</div>
+                    <div style="color:#6b5e4a;font-size:0.72rem;">📅 ${e.date||''}</div>
+                    ${e.message?`<div style="color:#888;font-size:0.7rem;font-style:italic;">"${e.message}"</div>`:''}
+                </div>
+                <span style="background:${sc}22;color:${sc};padding:2px 8px;border-radius:20px;font-size:0.62rem;font-weight:700;white-space:nowrap;">${e.status||'New'}</span>
+            </div>
+        </div>`;
+    }
+    let el = document.getElementById('bulkList');
+    if(el) el.innerHTML = html || '<p style="color:#999;text-align:center;padding:0.5rem;">No bulk enquiries yet.</p>';
+}
 function loadSettingsForm() { 
     document.getElementById('defaultCourier').value = settings.defaultCourier; 
     document.getElementById('freeMin').value = settings.freeMin; 
@@ -6478,8 +6787,12 @@ function loadSettingsForm() {
     let accNameEl = document.getElementById('settingAccountName'); if(accNameEl) accNameEl.value = settings.accountName || '';
     // QR preview
     let qrPrev = document.getElementById('settingQRPreview');
-    if(qrPrev && settings.qrCodeImage) {
-        qrPrev.innerHTML = '<img src="' + settings.qrCodeImage + '" style="max-width:150px;border-radius:8px;border:1px solid #ddd;">';
+    if(qrPrev) {
+        if(settings.qrCodeImage) {
+            qrPrev.innerHTML = '<img src="' + settings.qrCodeImage + '" style="max-width:150px;border-radius:8px;border:1px solid #ddd;"><button onclick="removeQRCode()" style="display:block;margin-top:4px;background:#ff4444;color:white;border:none;border-radius:6px;padding:2px 10px;font-size:0.68rem;cursor:pointer;">🗑️ Remove QR</button>';
+        } else {
+            qrPrev.innerHTML = '<div style="font-size:0.7rem;color:#999;margin-top:3px;">Koi QR code upload nahi hua.</div>';
+        }
     }
     // Load unit management
     loadUnitsDisplay();
@@ -6523,6 +6836,13 @@ function removeCompanyLogo() {
     loadSettingsForm();
     showToast('🗑️ Logo removed', '#ff9800');
 }
+function removeQRCode() {
+    if(!confirm('Remove QR code image?')) return;
+    delete settings.qrCodeImage;
+    saveSettingsData();
+    loadSettingsForm();
+    showToast('🗑️ QR code removed', '#ff9800');
+}
 function autoFillSellerStateFromGSTIN() {
     let gstinEl = document.getElementById('settingGSTIN');
     let stateEl = document.getElementById('settingSellerState');
@@ -6538,13 +6858,19 @@ function autoFillSellerStateFromGSTIN() {
 
 function savePaymentSettings() {
     let gstinEl = document.getElementById('settingGSTIN'); if(gstinEl) settings.gstin = gstinEl.value.trim().toUpperCase();
-    // ✅ FIX: Seller state save karo (GSTIN se auto-derive ya manual select)
+    // ✅ FIX: Seller state — pehle GSTIN se auto-derive karo, phir manual selection override kare
     let sellerStateEl = document.getElementById('settingSellerState');
-    if(sellerStateEl) settings.sellerStateCode = sellerStateEl.value || '10';
-    // If GSTIN entered and state not manually changed, auto-derive
-    if(settings.gstin && settings.gstin.length >= 2 && !sellerStateEl?.value) {
-        settings.sellerStateCode = settings.gstin.substring(0,2);
+    // Step 1: GSTIN se auto-derive karo (agar GSTIN valid hai)
+    if(settings.gstin && settings.gstin.length >= 2) {
+        let derivedCode = settings.gstin.substring(0, 2);
+        if(/^\d{2}$/.test(derivedCode)) settings.sellerStateCode = derivedCode;
     }
+    // Step 2: Agar user ne manually dropdown se state select kiya hai to override karo
+    if(sellerStateEl && sellerStateEl.value) {
+        settings.sellerStateCode = sellerStateEl.value;
+    }
+    // Step 3: Fallback — koi bhi nahi to Bihar (10) default
+    if(!settings.sellerStateCode) settings.sellerStateCode = '10';
     let upiEl = document.getElementById('settingUpiId'); if(upiEl) settings.upiId = upiEl.value;
     let bankNameEl = document.getElementById('settingBankName'); if(bankNameEl) settings.bankName = bankNameEl.value;
     let bankAccEl = document.getElementById('settingBankAccount'); if(bankAccEl) settings.bankAccount = bankAccEl.value;
@@ -11082,8 +11408,9 @@ async function openDistributorDashboard() {
     }
 
     document.getElementById('distributorDashboard').style.display = 'block';
-    distLoadProductCatalog();
+    distShowTab('home');
     distLoadNotice();
+    distLoadRecentOrders();
 }
 
 // --- Change Password ---
@@ -11207,32 +11534,73 @@ async function adminDeleteDistributor(id) {
 // DISTRIBUTOR DASHBOARD — ENHANCED FEATURES
 // ============================================================
 
-// Load product catalog for distributor
-function distLoadProductCatalog() {
+let _distAllOrders = [];
+let _distOrderFilter = 'all';
+
+function distShowTab(tab) {
+    ['home','catalog','order','history','profile'].forEach(t => {
+        const c = document.getElementById('distTabContent_' + t);
+        const b = document.getElementById('distTab_' + t);
+        if (c) c.style.display = t === tab ? 'block' : 'none';
+        if (b) {
+            b.style.color = t === tab ? '#2c5a4a' : '#888';
+            b.style.fontWeight = t === tab ? '700' : '600';
+            b.style.borderBottom = t === tab ? '3px solid #2c5a4a' : '3px solid transparent';
+        }
+    });
+    if (tab === 'catalog') distLoadProductCatalog();
+    if (tab === 'history') distLoadOrderHistory();
+    if (tab === 'profile') distLoadMonthlySummary();
+}
+
+async function distLoadProductCatalog() {
     const el = document.getElementById('distProductCatalog');
     const sel = document.getElementById('distOrderProduct');
     if (!el) return;
-    const prods = (window.b2bProducts && window.b2bProducts.length) ? window.b2bProducts : (window.products || []);
+    el.innerHTML = '<p style="color:#999;text-align:center;padding:1rem;">⏳ Loading...</p>';
+    try {
+        const { data, error } = await db.from('products').select('*').eq('in_stock', true).order('category');
+        if (!error && data && data.length > 0) {
+            window.products = data.map(p => ({
+                id: p.id, name: p.name, price: p.price || 0, mrp: p.mrp || 0,
+                category: p.category || '', imageType: p.image_type || 'emoji',
+                imageValue: p.image_value || '🌾', inStock: p.in_stock !== false,
+                stockQty: p.stock_qty || 0, minQty: p.min_qty || 1
+            }));
+        }
+    } catch(e) { console.log('distLoadProductCatalog error:', e.message); }
+    const prods = window.products || [];
     if (!prods.length) { el.innerHTML = '<p style="color:#999;text-align:center;">No products available.</p>'; return; }
-    el.innerHTML = prods.map(p => `
-        <div style="display:flex;justify-content:space-between;align-items:center;border:1px solid #eee;border-radius:10px;padding:0.6rem 0.8rem;margin-bottom:0.4rem;">
-            <div>
-                <div style="font-weight:700;color:#2c5a4a;font-size:0.85rem;">${p.imageType === 'emoji' ? (p.imageValue || '🌾') : '🌾'} ${p.name}</div>
-                <div style="font-size:0.72rem;color:#888;">${p.category || ''} ${p.minQty ? '· Min: ' + p.minQty : ''}</div>
-            </div>
-            <div style="text-align:right;">
-                <div style="font-weight:700;color:#c49a6c;">₹${p.price}/unit</div>
-                ${p.mrp && p.mrp > p.price ? `<div style="font-size:0.68rem;color:#aaa;text-decoration:line-through;">₹${p.mrp}</div>` : ''}
-                <div style="font-size:0.68rem;color:${p.inStock !== false ? '#27ae60' : '#e74c3c'}">${p.inStock !== false ? '✅ In Stock' : '❌ Out of Stock'}</div>
-            </div>
-        </div>`).join('');
-    // Populate dropdown
+    const cats = [...new Set(prods.map(p => p.category).filter(Boolean))];
+    const filterEl = document.getElementById('distCatFilter');
+    if (filterEl) {
+        filterEl.innerHTML = `<button onclick="distRenderCatalog('all')" style="flex:none;padding:4px 12px;border-radius:20px;border:none;background:#2c5a4a;color:white;font-size:0.72rem;cursor:pointer;">All</button>` +
+            cats.map(c => `<button onclick="distRenderCatalog('${c}')" style="flex:none;padding:4px 12px;border-radius:20px;border:1px solid #ddd;background:white;color:#555;font-size:0.72rem;cursor:pointer;">${c}</button>`).join('');
+    }
+    distRenderCatalog('all');
     if (sel) {
         sel.innerHTML = '<option value="">-- Select Product --</option>' + prods.map(p => `<option value="${p.id}">${p.name} — ₹${p.price}</option>`).join('');
     }
 }
 
-// Load notice from settings
+function distRenderCatalog(cat) {
+    const el = document.getElementById('distProductCatalog');
+    if (!el) return;
+    const prods = (window.products || []).filter(p => cat === 'all' || p.category === cat);
+    el.innerHTML = prods.map(p => `
+        <div style="display:flex;justify-content:space-between;align-items:center;border:1px solid #eee;border-radius:10px;padding:0.7rem 0.8rem;margin-bottom:0.5rem;background:white;">
+            <div>
+                <div style="font-weight:700;color:#2c5a4a;font-size:0.88rem;">${p.imageType === 'emoji' ? (p.imageValue || '🌾') : '🌾'} ${p.name}</div>
+                <div style="font-size:0.72rem;color:#888;margin-top:2px;">${p.category || ''} ${p.minQty > 1 ? '· Min: ' + p.minQty + ' units' : ''}</div>
+            </div>
+            <div style="text-align:right;">
+                <div style="font-weight:800;color:#c49a6c;font-size:0.95rem;">₹${p.price}</div>
+                ${p.mrp && p.mrp > p.price ? `<div style="font-size:0.68rem;color:#aaa;text-decoration:line-through;">₹${p.mrp}</div>` : ''}
+                <div style="font-size:0.68rem;color:${p.inStock !== false ? '#27ae60' : '#e74c3c'};margin-top:2px;">${p.inStock !== false ? '✅ In Stock' : '❌ Out of Stock'}</div>
+            </div>
+        </div>`).join('') || '<p style="color:#999;text-align:center;">No products in this category.</p>';
+}
+
 async function distLoadNotice() {
     try {
         const { data } = await db.from('settings').select('value').eq('key', 'dist_notice').maybeSingle();
@@ -11245,18 +11613,147 @@ async function distLoadNotice() {
     } catch(e) { /* notice optional */ }
 }
 
-// Place order via WhatsApp
+async function distLoadOrderHistory() {
+    if (!currentDistributor) return;
+    const el = document.getElementById('distDashOrders');
+    if (el) el.innerHTML = '<p style="color:#999;text-align:center;padding:1rem;">⏳ Loading...</p>';
+    try {
+        const orders = await sbDistGetOrders(currentDistributor.email);
+        _distAllOrders = orders;
+        distRenderOrders('all');
+    } catch(e) {
+        if (el) el.innerHTML = '<p style="color:#e74c3c;text-align:center;">Error loading orders.</p>';
+    }
+}
+
+function distFilterOrders(filter) {
+    _distOrderFilter = filter;
+    ['all','pending','shipped','delivered'].forEach(f => {
+        const btn = document.getElementById('distOrdFilter' + f.charAt(0).toUpperCase() + f.slice(1));
+        if (btn) {
+            btn.style.background = f === filter ? '#2c5a4a' : 'white';
+            btn.style.color = f === filter ? 'white' : '#555';
+            btn.style.border = f === filter ? 'none' : '1px solid #ddd';
+        }
+    });
+    distRenderOrders(filter);
+}
+
+function distRenderOrders(filter) {
+    const el = document.getElementById('distDashOrders');
+    if (!el) return;
+    const statusColor = { pending: '#e67e22', processing: '#3498db', shipped: '#8e44ad', delivered: '#27ae60', cancelled: '#e74c3c' };
+    let list = _distAllOrders;
+    if (filter !== 'all') list = list.filter(o => (o.status || '').toLowerCase().includes(filter));
+    if (!list.length) { el.innerHTML = '<p style="color:#999;text-align:center;padding:1rem;">No orders found.</p>'; return; }
+    el.innerHTML = list.map(o => {
+        const st = (o.status || 'pending').toLowerCase();
+        const col = statusColor[st] || '#888';
+        const date = (o.date || o.created_at || '').toString().slice(0,10);
+        return `<div style="border:1px solid #eee;border-radius:12px;padding:0.8rem;margin-bottom:0.6rem;background:white;">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;">
+                <div>
+                    <div style="font-weight:700;color:#2c5a4a;font-size:0.88rem;">Order #${o.id}</div>
+                    <div style="font-size:0.72rem;color:#aaa;margin-top:2px;">📅 ${date}</div>
+                    ${o.items && o.items.length ? `<div style="font-size:0.72rem;color:#888;margin-top:3px;">📦 ${o.items.map(i=>i.name||i.productName||'Item').join(', ')}</div>` : ''}
+                </div>
+                <div style="text-align:right;">
+                    <div style="font-weight:800;color:#c49a6c;">₹${o.total || o.amount || 0}</div>
+                    <span style="font-size:0.68rem;padding:2px 8px;border-radius:20px;background:${col}22;color:${col};border:1px solid ${col};font-weight:700;">${(o.status||'Pending').toUpperCase()}</span>
+                </div>
+            </div>
+        </div>`;
+    }).join('');
+}
+
+async function distLoadMonthlySummary() {
+    if (!currentDistributor) return;
+    const el = document.getElementById('distMonthlySummary');
+    if (!el) return;
+    try {
+        const orders = _distAllOrders.length ? _distAllOrders : await sbDistGetOrders(currentDistributor.email);
+        const now = new Date();
+        const thisMonth = orders.filter(o => { const d = new Date(o.date || o.created_at); return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear(); });
+        const lastMonth = orders.filter(o => { const d = new Date(o.date || o.created_at); const lm = new Date(now.getFullYear(), now.getMonth() - 1, 1); return d.getMonth() === lm.getMonth() && d.getFullYear() === lm.getFullYear(); });
+        const thisTotal = thisMonth.reduce((s,o) => s + (parseFloat(o.total)||0), 0);
+        const lastTotal = lastMonth.reduce((s,o) => s + (parseFloat(o.total)||0), 0);
+        el.innerHTML = `<div style="display:grid;grid-template-columns:1fr 1fr;gap:0.6rem;">
+            <div style="background:#f5f9f7;border-radius:10px;padding:0.8rem;text-align:center;">
+                <div style="font-size:0.7rem;color:#888;">This Month</div>
+                <div style="font-size:1.3rem;font-weight:800;color:#2c5a4a;">${thisMonth.length} orders</div>
+                <div style="font-size:0.8rem;font-weight:700;color:#c49a6c;">₹${thisTotal.toFixed(0)}</div>
+            </div>
+            <div style="background:#f5f9f7;border-radius:10px;padding:0.8rem;text-align:center;">
+                <div style="font-size:0.7rem;color:#888;">Last Month</div>
+                <div style="font-size:1.3rem;font-weight:800;color:#2c5a4a;">${lastMonth.length} orders</div>
+                <div style="font-size:0.8rem;font-weight:700;color:#c49a6c;">₹${lastTotal.toFixed(0)}</div>
+            </div>
+        </div>
+        <div style="margin-top:0.6rem;background:#f5f9f7;border-radius:10px;padding:0.8rem;text-align:center;">
+            <div style="font-size:0.7rem;color:#888;">Total Business (All Time)</div>
+            <div style="font-size:1.5rem;font-weight:800;color:#2c5a4a;">₹${orders.reduce((s,o)=>s+(parseFloat(o.total)||0),0).toFixed(0)}</div>
+        </div>`;
+    } catch(e) { if (el) el.innerHTML = '<p style="color:#e74c3c;text-align:center;">Error.</p>'; }
+}
+
+function distContactAdmin() {
+    if (!currentDistributor) return;
+    const waNo = (window.settings && window.settings.whatsappNo) ? window.settings.whatsappNo : '919006606697';
+    const msg = `Hello Nexdrop,\nMera naam ${currentDistributor.name} hai.\nBusiness: ${currentDistributor.business_name || 'N/A'}\nPhone: ${currentDistributor.phone}\nEmail: ${currentDistributor.email}\n\nMujhe kuch baat karni hai.`;
+    window.open('https://wa.me/' + waNo + '?text=' + encodeURIComponent(msg), '_blank');
+}
+
 function distPlaceOrder() {
     if (!currentDistributor) return;
     const sel = document.getElementById('distOrderProduct');
     const qty = document.getElementById('distOrderQty').value.trim();
     const note = document.getElementById('distOrderNote').value.trim();
+    const addr = document.getElementById('distOrderAddress') ? document.getElementById('distOrderAddress').value.trim() : '';
     if (!sel.value) { alert('⚠️ Product select karein.'); return; }
     if (!qty || isNaN(qty) || qty <= 0) { alert('⚠️ Valid quantity enter karein.'); return; }
     const productName = sel.options[sel.selectedIndex].text;
-    const msg = `🏭 *DISTRIBUTOR ORDER — Nexdrop Mart*\n━━━━━━━━━━━━━━━━\n👤 *Distributor:* ${currentDistributor.name}\n🏢 *Business:* ${currentDistributor.business_name || 'N/A'}\n📱 *Phone:* ${currentDistributor.phone}\n📧 *Email:* ${currentDistributor.email}\n🏙️ *Location:* ${currentDistributor.city}, ${currentDistributor.state}\n\n📦 *Product:* ${productName}\n🔢 *Quantity:* ${qty}\n${note ? '💬 *Note:* ' + note : ''}\n━━━━━━━━━━━━━━━━\nPlease confirm availability and pricing.`;
+    const p = (window.products || []).find(x => x.id === parseInt(sel.value));
+    const estTotal = p ? (p.price * parseFloat(qty)).toFixed(0) : 'N/A';
+    const msg = `🏭 *DISTRIBUTOR ORDER — Nexdrop Mart*\n━━━━━━━━━━━━━━━━\n👤 *Distributor:* ${currentDistributor.name}\n🏢 *Business:* ${currentDistributor.business_name || 'N/A'}\n📱 *Phone:* ${currentDistributor.phone}\n📧 *Email:* ${currentDistributor.email}\n🏙️ *Location:* ${currentDistributor.city}, ${currentDistributor.state}\n\n📦 *Product:* ${productName}\n🔢 *Quantity:* ${qty}\n💰 *Est. Total:* ₹${estTotal}\n${addr ? '📍 *Delivery Address:* ' + addr : ''}\n${note ? '💬 *Note:* ' + note : ''}\n━━━━━━━━━━━━━━━━\nPlease confirm availability and pricing.`;
     const waNo = (window.settings && window.settings.whatsappNo) ? window.settings.whatsappNo : '919006606697';
     window.open('https://wa.me/' + waNo + '?text=' + encodeURIComponent(msg), '_blank');
+}
+
+async function distLoadRecentOrders() {
+    if (!currentDistributor) return;
+    const el = document.getElementById('distRecentOrders');
+    if (!el) return;
+    try {
+        const orders = await sbDistGetOrders(currentDistributor.email);
+        _distAllOrders = orders;
+        const recent = orders.slice(0, 3);
+        const statusColor = { pending: '#e67e22', shipped: '#8e44ad', delivered: '#27ae60', cancelled: '#e74c3c' };
+        if (!recent.length) { el.innerHTML = '<p style="color:#999;text-align:center;padding:0.5rem;">No orders yet.</p>'; return; }
+        el.innerHTML = recent.map(o => {
+            const st = (o.status || 'pending').toLowerCase();
+            const col = statusColor[st] || '#888';
+            return `<div style="display:flex;justify-content:space-between;align-items:center;border:1px solid #eee;border-radius:10px;padding:0.6rem 0.8rem;margin-bottom:0.4rem;">
+                <div>
+                    <div style="font-weight:700;color:#2c5a4a;font-size:0.85rem;">Order #${o.id}</div>
+                    <div style="font-size:0.7rem;color:#aaa;">${(o.date||o.created_at||'').toString().slice(0,10)}</div>
+                </div>
+                <div style="text-align:right;">
+                    <div style="font-weight:700;color:#c49a6c;">₹${o.total||0}</div>
+                    <span style="font-size:0.65rem;padding:2px 7px;border-radius:20px;background:${col}22;color:${col};border:1px solid ${col};font-weight:700;">${(o.status||'Pending').toUpperCase()}</span>
+                </div>
+            </div>`;
+        }).join('');
+        const total = orders.reduce((s,o) => s+(parseFloat(o.total)||0),0);
+        const pending = orders.filter(o=>(o.status||'').toLowerCase().includes('pending')).length;
+        const delivered = orders.filter(o=>(o.status||'').toLowerCase().includes('delivered')).length;
+        document.getElementById('distStatOrders').textContent = orders.length;
+        document.getElementById('distStatAmount').textContent = '₹'+total.toFixed(0);
+        document.getElementById('distStatPending').textContent = pending;
+        const dEl = document.getElementById('distStatDelivered');
+        if (dEl) dEl.textContent = delivered;
+    } catch(e) {
+        if (el) el.innerHTML = '<p style="color:#999;text-align:center;">No orders found.</p>';
+    }
 }
 
 // ============================================================

@@ -4680,7 +4680,7 @@ function displayB2B() {
                 ${hlHtml}
                 <div class="price" style="margin:0.4rem 0;">
                     ${hasNumericPrice && discPrice !== null
-                        ? `<span class="current-price" style="font-size:1rem;">₹${discPrice}</span>${p.discount>0?`<span class="original-price">₹${numPrice}</span><span style="font-size:0.65rem;background:#c49a6c;color:white;padding:1px 6px;border-radius:10px;margin-left:4px;">${p.discount}% OFF</span>`:''}`
+                        ? `<span class="current-price" style="font-size:1rem;">₹${discPrice}${p.priceUnit?'<span style="font-size:0.7rem;font-weight:500;color:#6b5e4a;">/'+(p.priceUnit)+'</span>':''}</span>${p.discount>0?`<span class="original-price">₹${numPrice}</span><span style="font-size:0.65rem;background:#c49a6c;color:white;padding:1px 6px;border-radius:10px;margin-left:4px;">${p.discount}% OFF</span>`:''}`
                         : `<span class="current-price" style="font-size:1rem;">${p.price}${(p.price&&!String(p.price).includes('/kg')&&!String(p.price).includes('Contact')&&!String(p.price).includes('contact'))?'/kg':''}</span>`
                     }
                 </div>
@@ -4755,7 +4755,7 @@ function openProductModal(type, id) {
         document.getElementById('pdm_stock').innerHTML = p.inStock ? '<span style="color:#2c5a4a;">✅ In Stock</span>' : '<span style="color:#ff4444;">❌ Out of Stock</span>';
         document.getElementById('pdm_cod').innerHTML = p.codAllowed!==false ? '<span style="color:#2c5a4a;">🏠 COD Available</span>' : '<span style="color:#ff4444;">🚫 COD Not Available</span>';
     } else {
-        document.getElementById('pdm_price').innerHTML = '<span style="font-size:1.2rem;font-weight:800;color:#c49a6c;">'+p.price+'</span>';
+        document.getElementById('pdm_price').innerHTML = '<span style="font-size:1.2rem;font-weight:800;color:#c49a6c;">'+p.price+(p.priceUnit?'<span style="font-size:0.8rem;font-weight:500;color:#6b5e4a;">/'+p.priceUnit+'</span>':'')+'</span>';
         document.getElementById('pdm_courier').innerText = '📦 Min Order: ' + p.minQty;
         document.getElementById('pdm_stock').innerHTML = '';
         document.getElementById('pdm_cod').innerHTML = '';
@@ -5715,7 +5715,11 @@ function showUserPassMsg(text, color) {
 }
 function loadDashboard() {
     document.getElementById('userInfo').innerHTML = `<p>👤 <strong>${currentUser.name}</strong></p><p>✉️ ${currentUser.email}</p><p>📞 ${currentUser.phone}</p><p>📍 ${currentUser.address}</p>${currentUser.gstin ? `<p style="font-size:0.78rem;color:#7b1fa2;">🏢 GSTIN: <strong>${currentUser.gstin}</strong>${currentUser.stateCode ? ' &nbsp;|&nbsp; State Code: <strong>' + currentUser.stateCode + '</strong>' : ''}</p>` : ''}`;
-    let userOrders = orders.filter(o => o.userId === currentUser.email);
+    let userOrders = orders.filter(o =>
+        (o.userId && o.userId === currentUser.email) ||
+        (o.customerPhone && o.customerPhone === currentUser.phone) ||
+        (o.customerName && o.customerName === currentUser.name)
+    );
     let totalSpent = userOrders.filter(o=>o.status!=='Cancelled').reduce((s,o)=>{ let t=typeof o.total==='number'?o.total:parseInt(String(o.total).replace(/[₹,]/g,''))||0; return s+t; },0);
     let delivered = userOrders.filter(o=>o.status==='Delivered').length;
     let loyaltyPts = Math.floor(totalSpent / 100);
@@ -5808,7 +5812,12 @@ function showLoyaltyPoints() {
     let detailEl = document.getElementById('loyaltyPointsDetail');
     let textEl = document.getElementById('loyaltyPointsText');
     if(!currentUser) return;
-    let userOrders = orders.filter(o => o.userId === currentUser.email && o.status !== 'Cancelled');
+    let userOrders = orders.filter(o =>
+        ((o.userId && o.userId === currentUser.email) ||
+         (o.customerPhone && o.customerPhone === currentUser.phone) ||
+         (o.customerName && o.customerName === currentUser.name)) &&
+        o.status !== 'Cancelled'
+    );
     let totalSpent = userOrders.reduce((s,o) => { let t=typeof o.total==='number'?o.total:parseInt(String(o.total).replace(/[₹,]/g,''))||0; return s+t; }, 0);
     let points = Math.floor(totalSpent / 100);
     let discount = Math.floor(points / 50) * 50;
@@ -6460,8 +6469,33 @@ function updateStatus(id, status) {
     if(!o) return;
     let prevStatus = o.status;
     o.status = status;
-    // ── AUTO BILL SEND WHEN CONFIRMED ──
+    // ── AUTO BILL SEND + STOCK DEDUCT WHEN CONFIRMED ──
     if(status === 'Confirmed' && prevStatus !== 'Confirmed') {
+        // ── AUTO STOCK DEDUCTION ON CONFIRMED ──
+        if(!o.stockDeducted) {
+            let deducted = [];
+            let outOfStock = [];
+            for(let item of o.items) {
+                let prod = item.isWholesale
+                    ? (b2bProducts.find(p => p.id === item.productId) || b2bProducts.find(p => p.name === item.name))
+                    : (products.find(p => p.id === item.productId) || products.find(p => p.name === item.name));
+                if(!prod) prod = products.find(p => p.id === item.productId) || products.find(p => p.name === item.name) || b2bProducts.find(p => p.id === item.productId) || b2bProducts.find(p => p.name === item.name);
+                if(prod && prod.stockQty !== null && prod.stockQty !== undefined) {
+                    prod.stockQty = Math.max(0, prod.stockQty - item.quantity);
+                    if(prod.stockQty === 0) { prod.inStock = false; outOfStock.push(prod.name); }
+                    deducted.push(item.name + ' −' + item.quantity);
+                }
+            }
+            o.stockDeducted = true;
+            saveProducts(); saveB2B();
+            displayProducts(); displayB2B();
+            refreshStockDashboard();
+            if(deducted.length) {
+                let stockMsg = '📦 Stock auto-minus (Confirmed): ' + deducted.join(', ');
+                if(outOfStock.length) stockMsg += ' | ❌ Out: ' + outOfStock.join(', ');
+                showToast(stockMsg, '#2c5a4a');
+            }
+        }
         saveOrders();
         showToast('✅ Order Confirmed! Customer ko WhatsApp bheja jayega...', '#2c5a4a');
         setTimeout(() => {
@@ -6565,8 +6599,8 @@ function updateStatus(id, status) {
         }, 400);
     }
     // ── FIX: Stock restore — ANY status change away from Shipped/Delivered ──
-    let stockRestoredStatuses = ['Pending','Confirmed','Processing','Cancelled'];
-    if(stockRestoredStatuses.includes(status) && (prevStatus === 'Shipped' || prevStatus === 'Delivered') && o.stockDeducted) {
+    let stockRestoredStatuses = ['Pending','Processing','Cancelled'];
+    if(stockRestoredStatuses.includes(status) && (prevStatus === 'Shipped' || prevStatus === 'Delivered' || prevStatus === 'Confirmed') && o.stockDeducted) {
         for(let item of o.items) {
             let prod = item.isWholesale
                 ? (b2bProducts.find(p => p.id === item.productId) || b2bProducts.find(p => p.name === item.name))
@@ -6966,7 +7000,7 @@ function adminLogout() {
     }
 }
 function switchTab(tab) {
-    let tabs = ['products','orders','stock','users','bulk','dealership','distributors','b2b','wholesale-invoice','khata','purchase','brcm','gst','reports','reviews','coupons','settings','home','sellers'];
+    let tabs = ['coupons','analytics','reviews','sellers','products','orders','stock','users','bulk','dealership','distributors','b2b','wholesale-invoice','khata','purchase','brcm','gst','reports','settings',null,null];
     document.querySelectorAll(".admin-tab").forEach((t,i)=>t.classList.toggle("active",tabs[i]===tab));
     document.querySelectorAll(".tab-content").forEach(t=>t.classList.remove("active"));
     let el = document.getElementById("tab-"+tab); if(el) el.classList.add("active");

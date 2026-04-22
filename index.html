@@ -11936,15 +11936,16 @@ function populateCategoryDropdowns() {
         });
     }
 
-    // ── Dynamic tabs: Public shop filter (v38) ──
+    // ── Dynamic tabs: Public shop filter (v38 — fixed v39) ──
+    // ✅ FIX: Settings categories use karo (not raw product categories)
     let hpContainer = document.getElementById('hpTabsContainer');
     if(hpContainer) {
         hpContainer.querySelectorAll('.hp-tab:not(#hpTab_all)').forEach(el => el.remove());
-        let allProds = [
-            ...(typeof products !== 'undefined' ? products : []),
-            ...(typeof b2bProducts !== 'undefined' ? b2bProducts : [])
-        ];
-        [...new Set(allProds.map(p => p.category).filter(Boolean))].sort().forEach(c => {
+        // ✅ Sirf settings se defined categories use karo — products ke raw category field se nahi
+        let settingsCats = (window._nexdropCatsCache && window._nexdropCatsCache.length)
+            ? window._nexdropCatsCache
+            : (typeof getCategories === 'function' ? getCategories() : []);
+        settingsCats.forEach(c => {
             let slug = 'dyncat_' + c.toLowerCase().trim().replace(/\s+/g,'_').replace(/[^a-z0-9_]/g,'');
             let btnId = 'hpTab_' + slug;
             if(document.getElementById(btnId)) return;

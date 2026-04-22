@@ -11606,11 +11606,22 @@ function updateHeroCategoryCount() {
     // 4. About section — dynamic category boxes
     let boxContainer = document.getElementById('aboutCategoryBoxes');
     if(boxContainer) {
-        boxContainer.innerHTML = cats.map((cat, i) => {
+        const fixed4 = [
+            {name:'Retail Tea', icon:'☕'},
+            {name:'Wholesale Tea', icon:'📦'},
+            {name:'Retail Makhana', icon:'🌾'},
+            {name:'Wholesale Makhana', icon:'🎁'}
+        ];
+        let allBoxCats = [
+            ...fixed4.map(f => ({name: f.name, fixedIcon: f.icon})),
+            ...cats.map(c => ({name: c, fixedIcon: null}))
+        ];
+        boxContainer.innerHTML = allBoxCats.map((cat, i) => {
             let s = _catBoxStyles[i % _catBoxStyles.length];
+            let icon = cat.fixedIcon || s.icon;
             return `<div style="background:${s.bg};border-radius:14px;padding:1rem;text-align:center;border:1px solid ${s.border};">
-                <div style="font-size:1.8rem;">${s.icon}</div>
-                <div style="font-weight:700;font-size:0.88rem;color:${s.nameColor};margin-top:0.3rem;">${cat}</div>
+                <div style="font-size:1.8rem;">${icon}</div>
+                <div style="font-weight:700;font-size:0.88rem;color:${s.nameColor};margin-top:0.3rem;">${cat.name}</div>
                 <div style="font-size:0.72rem;color:${s.descColor};margin-top:0.2rem;">Nexdrop Product Category</div>
             </div>`;
         }).join('');

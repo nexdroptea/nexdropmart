@@ -5296,7 +5296,7 @@ function displayProducts() {
   <div class="product-image">${imgHtml}</div>
   <div class="product-info">
     <div class="product-name">${p.name}</div>
-    <div class="price"><span class="current-price">₹${Math.round(discPrice)}${p.priceUnit?'<span style="font-size:0.7rem;font-weight:500;color:#6b5e4a;">/'+p.priceUnit+'</span>':''}</span>${p.discount>0?'<span class="original-price">₹'+p.price+'</span>':''}</div>
+    <div class="price"><span class="current-price">₹${Math.round(discPrice)}${p.priceUnit?'<span style="font-size:0.7rem;font-weight:500;color:#6b5e4a;">/'+p.priceUnit+'</span>':''}</span>${p.discount>0?' <span style="font-size:0.9rem;color:#999;margin:0 4px;">-</span> <span class="original-price" style="font-size:0.85rem;text-decoration:line-through;">₹'+p.price+'</span> <span style="font-size:0.65rem;background:#2c5a4a;color:white;padding:1px 6px;border-radius:10px;margin-left:2px;">'+p.discount+'% OFF</span>':''}</div>
     <div style="display:flex;gap:0.3rem;margin-top:0.6rem;">
       <button class="add-to-cart" onclick="event.stopPropagation();addToCart(${p.id});showToast('✅ Added to cart!','#2c5a4a');" style="flex:1;background:#2c5a4a;font-size:0.75rem;padding:0.55rem 0.4rem;">🛒 Add to Cart</button>
     </div>
@@ -5346,8 +5346,10 @@ function displayB2B() {
         } else {
             stockBadge = '<div style="font-size:0.65rem;color:#2c5a4a;font-weight:700;margin:2px 0;">\u2705 In Stock</div>';
         }
-        let numPrice = parseFloat(String(p.price).replace(/[^0-9.]/g,''));
-        let hasNumericPrice = !isNaN(numPrice) && numPrice > 0;
+        let priceStr = String(p.price||'');
+        let isRangePrice = /[\u2013\u2014\-]/.test(priceStr.replace(/^[^0-9]*/,'').replace(/[^0-9\u2013\u2014\-]/g,'').slice(0,10));
+        let numPrice = parseFloat(priceStr.replace(/[^0-9.]/g,'').replace(/^(\d+).*$/,'$1'));
+        let hasNumericPrice = !isRangePrice && !isNaN(numPrice) && numPrice > 0;
         let discPrice = hasNumericPrice ? Math.round(numPrice - numPrice*(p.discount||0)/100) : null;
         let enquireBtn = !p.inStock
             ? `<button class="add-to-cart" style="background:#ccc;cursor:not-allowed;margin-top:0.8rem;" disabled>❌ Out of Stock</button>`
@@ -5366,7 +5368,7 @@ function displayB2B() {
                 ${hlHtml}
                 <div class="price" style="margin:0.4rem 0;">
                     ${hasNumericPrice && discPrice !== null
-                        ? `<span class="current-price" style="font-size:1rem;">₹${discPrice}</span>${p.discount>0?`<span class="original-price">₹${numPrice}</span><span style="font-size:0.65rem;background:#c49a6c;color:white;padding:1px 6px;border-radius:10px;margin-left:4px;">${p.discount}% OFF</span>`:''}`
+                        ? `<span class="current-price" style="font-size:1rem;">₹${discPrice}</span>${p.discount>0?` <span style="font-size:0.9rem;color:#999;margin:0 4px;">-</span> <span class="original-price" style="font-size:0.85rem;text-decoration:line-through;">₹${numPrice}</span> <span style="font-size:0.65rem;background:#c49a6c;color:white;padding:1px 6px;border-radius:10px;margin-left:2px;">${p.discount}% OFF</span>`:''}`
                         : `<span class="current-price" style="font-size:1rem;">${p.price}${(p.price&&!String(p.price).includes('/kg')&&!String(p.price).includes('Contact')&&!String(p.price).includes('contact'))?'/kg':''}</span>`
                     }
                 </div>

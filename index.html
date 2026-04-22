@@ -1767,6 +1767,22 @@ img { max-width: 100%; height: auto; }
     .feature-desc  { font-size: 0.7rem; }
 }
 
+/* --- B2B GRIDS: Always 4 columns on desktop --- */
+#b2bTeaGrid, #b2bMakhanaGrid, #b2bGrid {
+    grid-template-columns: repeat(4, 1fr) !important;
+    gap: 1.2rem !important;
+}
+#b2bTeaGrid .product-image,
+#b2bMakhanaGrid .product-image,
+#b2bGrid .product-image {
+    height: 160px !important;
+}
+@media (min-width: 769px) and (max-width: 1100px) {
+    #b2bTeaGrid, #b2bMakhanaGrid, #b2bGrid {
+        grid-template-columns: repeat(3, 1fr) !important;
+    }
+}
+
 /* --- PRODUCT GRID: 2-column on mobile --- */
 @media (max-width: 768px) {
     .product-grid {

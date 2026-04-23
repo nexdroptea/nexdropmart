@@ -20,7 +20,7 @@ const SUPABASE_ANON_KEY = 'sb_publishable_smvuZWu3CIswWErLlxDFUg_GIWEM83c';
 // Direct fetch() use karta hai — file:// aur https:// dono pe kaam karta hai
 const db = (function() {
     const BASE = SUPABASE_URL + '/rest/v1';
-    const AUTH = SUPABASE_URL + '/auth/v1';
+    // AUTH removed — unused dead code
     const HEADERS = {
         'apikey': SUPABASE_ANON_KEY,
         'Authorization': 'Bearer ' + SUPABASE_ANON_KEY,
@@ -28,13 +28,7 @@ const db = (function() {
         'Prefer': 'return=representation'
     };
 
-    function buildUrl(table, params) {
-        let url = BASE + '/' + table;
-        if(params && Object.keys(params).length) {
-            url += '?' + Object.entries(params).map(([k,v]) => k + '=' + encodeURIComponent(v)).join('&');
-        }
-        return url;
-    }
+    // buildUrl removed — unused dead code
 
     async function req(method, url, body, extraHeaders) {
         try {
@@ -65,7 +59,7 @@ const db = (function() {
         this._method = 'GET';
         this._body = undefined;
         this._upsertOnConflict = null;
-        this._prefer = null;
+        // _prefer removed — unused dead code
     }
     QueryBuilder.prototype.select = function(cols) { this._select = cols || '*'; return this; };
     QueryBuilder.prototype.eq = function(col, val) { this._filters.push(col + '=eq.' + val); return this; };
@@ -409,6 +403,8 @@ async function sbLoadOrders() {
                 courier: o.courier || 0,
                 customerGstin: o.customer_gstin || '',
                 customerStateCode: o.customer_state_code || '',
+                // ✅ FIX Bug2: customerStateName load karo Supabase se
+                customerStateName: o.customer_state_name || '',
                 date: o.created_at
             }));
         }
@@ -441,7 +437,9 @@ async function sbSaveOrder(order) {
             discount_amount: order.discountAmount || 0,
             courier: order.courier || 0,
             customer_gstin: order.customerGstin || '',
-            customer_state_code: order.customerStateCode || ''
+            customer_state_code: order.customerStateCode || '',
+            // ✅ FIX Bug2: customerStateName save karo — IGST/CGST detection ke liye
+            customer_state_name: order.customerStateName || ''
         };
         // ✅ FIX v36.7: upsert use karo — same ID pe update, naya ID pe insert
         const { data, error } = await db.from('orders').upsert([row], { onConflict: 'id' }).select();
@@ -5859,7 +5857,7 @@ async function checkout() {
     let orderTypeLabel = orderType === 'wholesale' ? '🏭 Wholesale Order' : orderType === 'mixed' ? '🔀 Mixed Order (Retail+Wholesale)' : '🛒 Retail Order';
     let message = "*" + (settings.companyName||'Nexdrop Mart') + " - New Order #" + orderId + "*\n" + orderTypeLabel + "\n\n*Customer Details:*\nName: " + currentUser.name + "\nPhone: " + currentUser.phone + "\nAddress: " + currentUser.address + "\n\n*Order Items:*\n" + itemLines + "\n\nSubtotal: ₹" + subtotal + couponLine + "\nCourier: " + (courier === 0 ? "FREE" : "₹"+courier) + "\n*Total: ₹" + total + "*\n\nPayment: " + paymentMethod + "\nDate: " + new Date().toLocaleString();
     cart = []; updateCartCount(); renderCart(); toggleCart();
-    window.open('https://wa.me/' + settings.whatsappNo + '?text=' + encodeURIComponent(message), '_blank');
+    window.open('https://wa.me/' + (settings.whatsappNo || '919006606697') + '?text=' + encodeURIComponent(message), '_blank'); // ✅ FIX Bug3: null guard
     setTimeout(() => sendPaymentDetailsToCustomer(orderId, total, currentUser.phone, paymentMethod), 1200);
 }
 
@@ -6019,7 +6017,7 @@ function buyNow(productId) {
         '\nDate: ' + new Date().toLocaleString();
 
     // Step 6: Open WhatsApp
-    window.open('https://wa.me/' + settings.whatsappNo + '?text=' + encodeURIComponent(message), '_blank');
+    window.open('https://wa.me/' + (settings.whatsappNo || '919006606697') + '?text=' + encodeURIComponent(message), '_blank'); // ✅ FIX Bug3: null guard
     showToast('✅ Order WhatsApp par bhej diya!', '#2c5a4a');
 
     // Step 7: Send payment details to customer
@@ -6191,7 +6189,7 @@ function sendBulkEnquiry() {
     bulkEnquiries.unshift(enquiry); saveBulk();
     let waMsg = "Nexdrop Mart - Bulk Enquiry\n\nName: " + name + "\nPhone: " + phone + "\nProduct: " + product + "\nQuantity: " + qty + "\nMessage: " + msg + "\n\nPlease share bulk pricing.";
     closeBulkModal();
-    window.open('https://wa.me/' + settings.whatsappNo + '?text=' + encodeURIComponent(waMsg), '_blank');
+    window.open('https://wa.me/' + (settings.whatsappNo || '919006606697') + '?text=' + encodeURIComponent(waMsg), '_blank'); // ✅ FIX Bug3: null guard
     showToast('✅ Bulk enquiry WhatsApp pe bhej di!', '#2c5a4a');
 }
 function openUserPanel() {
@@ -7694,6 +7692,8 @@ function loadSettingsForm() {
     }
     // Load unit management
     loadUnitsDisplay();
+    // ✅ FIX Bug1: Naye categories Settings tab mein dikhenge
+    if(typeof loadCategoryTagsList === 'function') loadCategoryTagsList();
 }
 function saveCompanySettings() {
     let cnEl = document.getElementById('settingCompanyName'); if(cnEl) settings.companyName = cnEl.value.trim() || 'Nexdrop Mart';
@@ -9155,6 +9155,7 @@ function printBill() {
     }
     let printContents = document.getElementById('billPrintArea').innerHTML;
     let w = window.open('', '_blank');
+    if(!w) { showToast('⚠️ Popup blocked! Browser mein popup allow karein.', '#ff9800'); return; } // ✅ FIX: null guard
     w.document.write('<!DOCTYPE html><html><head><meta charset="UTF-8"><title>'+companyName+' - Invoice</title><link href="https://fonts.googleapis.com/css2?family=Arial:wght@400;600;700&display=swap" rel="stylesheet"><style>'+
         'body{font-family:Arial,sans-serif;margin:0;padding:16px;color:#111;max-width:700px;margin:0 auto;font-size:11px;}'+
         '@media print{body{padding:8px;}button{display:none !important;}.no-print{display:none !important;}}'+
@@ -9820,6 +9821,7 @@ function printGSTReport() {
     let summEl = document.getElementById('gstSummaryCards');
     let summHTML = summEl ? summEl.innerHTML : '';
     let w = window.open('','_blank');
+    if(!w) { showToast('⚠️ Popup blocked! Browser mein popup allow karein.', '#ff9800'); return; } // ✅ FIX: null guard
     w.document.write(`<!DOCTYPE html><html><head><title>GST Report — ${compName}</title>
     <style>
       body{font-family:Arial,sans-serif;padding:1.5rem;color:#111;max-width:900px;margin:0 auto;}
@@ -11183,6 +11185,7 @@ function wiPrintInvoice() {
     let content = document.getElementById('wiInvoicePrintArea');
     if(!content) return;
     let w = window.open('','_blank');
+    if(!w) { showToast('⚠️ Popup blocked! Browser mein popup allow karein.', '#ff9800'); return; } // ✅ FIX: null guard
     w.document.write('<html><head><title>Wholesale Invoice</title><style>body{font-family:Arial,sans-serif;padding:1rem;max-width:600px;margin:0 auto;}table{width:100%;border-collapse:collapse;}table thead tr{background:#2c5a4a!important;color:white!important;-webkit-print-color-adjust:exact;print-color-adjust:exact;}table th{padding:0.4rem 0.5rem;}@media print{body{padding:0;}@page{margin:0.5cm;}}</style></head><body>');
     w.document.write(content.innerHTML);
     w.document.write('</body></html>');
@@ -11329,6 +11332,8 @@ function addUnit(type) {
     showToast(`✅ ${val} unit added!`, '#2c5a4a');
 }
 function deleteUnit(type, unit) {
+    // ✅ FIX: Confirm dialog — accidental delete se bachao
+    if(!confirm('"' + unit + '" unit delete karna chahte hain?')) return;
     let units = getUnits(type).filter(u => u !== unit);
     saveUnits(type, units);
     loadUnitsDisplay();
@@ -11617,6 +11622,7 @@ window.khataPrintLedger = function() {
         rows += `<tr><td>${escH(e.date)||'—'}</td><td>${escH(e.note)||'—'}</td><td style="color:#c62828;">${e.type==='debit'?'₹'+e.amount.toFixed(2):'—'}</td><td style="color:#2e7d32;">${e.type==='credit'?'₹'+e.amount.toFixed(2):'—'}</td><td style="font-weight:700;">${Math.abs(runBal).toFixed(2)} ${runBal>0?'Dr':runBal<0?'Cr':'Nil'}</td></tr>`;
     });
     const w = window.open('','_blank');
+    if(!w) { showToast('⚠️ Popup blocked! Browser mein popup allow karein.', '#ff9800'); return; } // ✅ FIX: null guard
     w.document.write(`<html><head><title>Khata - ${escH(c?.name)}</title><style>body{font-family:Arial,sans-serif;font-size:12px;padding:20px;}table{width:100%;border-collapse:collapse;}th,td{border:1px solid #ddd;padding:6px 8px;}th{background:#f5f5f5;font-weight:600;}h2{color:#c62828;}h3{color:#555;font-weight:400;}</style></head><body>
     <h2>📒 Khata Ledger — Nexdrop Mart</h2>
     <h3>Customer: <strong>${escH(c?.name)}</strong> | Phone: ${escH(c?.phone)||'—'}</h3>
@@ -11928,6 +11934,9 @@ function renameCategory(i) {
     // Products mein bhi old category ko new naam se replace karo
     products.forEach(p => { if((p.category||'') === oldName) p.category = newName; });
     saveProducts();
+    // ✅ FIX: b2bProducts bhi rename karo — warna Wholesale products orphan ho jaate hain
+    b2bProducts.forEach(p => { if((p.category||'') === oldName) p.category = newName; });
+    saveB2B();
     cats[i] = newName;
     saveCategories(cats);
     loadCategoryTagsList();
@@ -11962,6 +11971,8 @@ function addCategoryTag() {
 
 function removeCategoryTag(i) {
     let cats = getCategories();
+    // ✅ FIX: Confirm dialog — accidental delete se bachao
+    if(!confirm('"' + cats[i] + '" category delete karna chahte hain?')) return;
     let removed = cats.splice(i, 1)[0];
     saveCategories(cats);
     loadCategoryTagsList();
@@ -12145,6 +12156,8 @@ function addCoupon() {
     coupons.push({ code, type, value, minOrder, maxUses, usedCount: 0, expiry, desc, active: true, createdAt: new Date().toISOString() });
     saveCoupons(coupons);
     ['cpCode','cpValue','cpMinOrder','cpMaxUses','cpExpiry','cpDesc'].forEach(id => { let el=document.getElementById(id); if(el) el.value=''; });
+    // ✅ FIX: cpType dropdown bhi reset karo — default 'flat'
+    let cpTypeEl = document.getElementById('cpType'); if(cpTypeEl) cpTypeEl.value = 'flat';
     loadCouponsList();
     showToast('✅ Coupon "' + code + '" created!', '#c2185b');
 }
@@ -12477,9 +12490,9 @@ function loadAdminReviews() {
             <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:0.3rem;">
                 <div style="flex:1;">
                     <div style="color:#ffb800;font-size:1rem;line-height:1;">${stars}</div>
-                    <div style="font-weight:700;font-size:0.8rem;color:#1a2a1a;margin-top:2px;">${r.userName} <span style="color:#888;font-weight:400;font-size:0.68rem;">| ${r.productName}</span></div>
-                    <div style="font-size:0.75rem;color:#444;margin-top:3px;">"${r.text}"</div>
-                    <div style="font-size:0.65rem;color:#aaa;margin-top:2px;">${r.date}</div>
+                    <div style="font-weight:700;font-size:0.8rem;color:#1a2a1a;margin-top:2px;">${esc(r.userName)} <span style="color:#888;font-weight:400;font-size:0.68rem;">| ${esc(r.productName)}</span></div>
+                    <div style="font-size:0.75rem;color:#444;margin-top:3px;">"${esc(r.text)}"</div>
+                    <div style="font-size:0.65rem;color:#aaa;margin-top:2px;">${esc(r.date)}</div>
                 </div>
                 <div style="display:flex;flex-direction:column;gap:0.25rem;align-items:flex-end;">
                     <span style="background:${sc}22;color:${sc};padding:0.15rem 0.55rem;border-radius:20px;font-size:0.62rem;font-weight:700;">${r.status}</span>
@@ -12547,12 +12560,12 @@ function pdmLoadReviews(productName, type) {
                 <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.3rem;">
                   <div style="width:28px;height:28px;border-radius:50%;background:${bg};color:white;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:0.75rem;flex-shrink:0;">${initial}</div>
                   <div>
-                    <div style="font-weight:700;font-size:0.75rem;color:#1e2a2a;">${r.userName}</div>
+                    <div style="font-weight:700;font-size:0.75rem;color:#1e2a2a;">${esc(r.userName)}</div>
                     <div style="color:#f0a500;font-size:0.75rem;line-height:1;">${stars}</div>
                   </div>
                   <div style="margin-left:auto;font-size:0.6rem;color:#aaa;">${r.date||''}</div>
                 </div>
-                <div style="font-size:0.75rem;color:#444;line-height:1.5;font-style:italic;">"${r.text}"</div>
+                <div style="font-size:0.75rem;color:#444;line-height:1.5;font-style:italic;">"${esc(r.text)}"</div>
             </div>`;
         }).join('');
     }
@@ -12622,12 +12635,12 @@ function renderHomepageReviews() {
         let bg = colors[i % colors.length];
         return `<div style="background:white;border-radius:18px;padding:1.3rem;box-shadow:0 5px 20px rgba(0,0,0,0.06);position:relative;">
             <div style="color:#ffb800;font-size:1rem;margin-bottom:0.5rem;">${stars}</div>
-            <p style="font-size:0.85rem;color:#444;line-height:1.6;font-style:italic;">"${r.text}"</p>
+            <p style="font-size:0.85rem;color:#444;line-height:1.6;font-style:italic;">"${esc(r.text)}"</p>
             <div style="display:flex;align-items:center;gap:0.7rem;margin-top:1rem;">
                 <div style="width:38px;height:38px;border-radius:50%;background:linear-gradient(135deg,${bg},${colors[(i+1)%colors.length]});display:flex;align-items:center;justify-content:center;color:white;font-weight:700;font-size:1rem;">${initial}</div>
                 <div>
-                    <div style="font-weight:700;font-size:0.85rem;">${r.userName}</div>
-                    <div style="font-size:0.7rem;color:#c49a6c;">📦 ${r.productName}</div>
+                    <div style="font-weight:700;font-size:0.85rem;">${esc(r.userName)}</div>
+                    <div style="font-size:0.7rem;color:#c49a6c;">📦 ${esc(r.productName)}</div>
                 </div>
             </div>
             <div style="position:absolute;top:1rem;right:1rem;background:#e8f5e9;color:#2c5a4a;padding:2px 8px;border-radius:20px;font-size:0.62rem;font-weight:700;">✅ Verified</div>
@@ -13168,6 +13181,7 @@ function printPnLReport() {
     let cardsEl = document.getElementById('plSummaryCards');
     if(!tableEl){showToast('P&L table nahi mila!','#c62828');return;}
     let w = window.open('','_blank');
+    if(!w) { showToast('⚠️ Popup blocked! Browser mein popup allow karein.', '#ff9800'); return; } // ✅ FIX: null guard
     w.document.write(`<!DOCTYPE html><html><head><title>P&L Statement — ${compName} ${year}</title>
     <style>
       body{font-family:Arial,sans-serif;padding:1.5rem;color:#111;max-width:900px;margin:0 auto;}

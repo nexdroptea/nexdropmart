@@ -955,8 +955,7 @@ async function initSupabase() {
         /* SECURITY: console.log('Admin credentials load failed:', e.message) */;
     }
 
-    updateMakhanaImages();
-    updateStats();
+        updateStats();
     displayProducts();
     displayB2B();
     if(typeof displayHomeProducts === 'function') displayHomeProducts(); // ✅ FIX: Home page grid update karo
@@ -1264,8 +1263,7 @@ function _stripPasswords(usersArr) {
   window['updateStatus']=window['updateStatus']||function(){var a=arguments,self=this;setTimeout(function(){if(window['updateStatus']&&!window['updateStatus']._s)window['updateStatus'].apply(self,a);},400);};window['updateStatus']._s=1;
   window['uploadAdminPhoto']=window['uploadAdminPhoto']||function(){var a=arguments,self=this;setTimeout(function(){if(window['uploadAdminPhoto']&&!window['uploadAdminPhoto']._s)window['uploadAdminPhoto'].apply(self,a);},400);};window['uploadAdminPhoto']._s=1;
   window['uploadB2BPhoto']=window['uploadB2BPhoto']||function(){var a=arguments,self=this;setTimeout(function(){if(window['uploadB2BPhoto']&&!window['uploadB2BPhoto']._s)window['uploadB2BPhoto'].apply(self,a);},400);};window['uploadB2BPhoto']._s=1;
-  window['uploadMakhanaPhoto']=window['uploadMakhanaPhoto']||function(){var a=arguments,self=this;setTimeout(function(){if(window['uploadMakhanaPhoto']&&!window['uploadMakhanaPhoto']._s)window['uploadMakhanaPhoto'].apply(self,a);},400);};window['uploadMakhanaPhoto']._s=1;
-  window['userLogout']=window['userLogout']||function(){var a=arguments,self=this;setTimeout(function(){if(window['userLogout']&&!window['userLogout']._s)window['userLogout'].apply(self,a);},400);};window['userLogout']._s=1;
+    window['userLogout']=window['userLogout']||function(){var a=arguments,self=this;setTimeout(function(){if(window['userLogout']&&!window['userLogout']._s)window['userLogout'].apply(self,a);},400);};window['userLogout']._s=1;
   window['userRegister']=window['userRegister']||function(){var a=arguments,self=this;setTimeout(function(){if(window['userRegister']&&!window['userRegister']._s)window['userRegister'].apply(self,a);},400);};window['userRegister']._s=1;
   window['wiAddRow']=window['wiAddRow']||function(){var a=arguments,self=this;setTimeout(function(){if(window['wiAddRow']&&!window['wiAddRow']._s)window['wiAddRow'].apply(self,a);},400);};window['wiAddRow']._s=1;
   window['wiCalculateTotals']=window['wiCalculateTotals']||function(){var a=arguments,self=this;setTimeout(function(){if(window['wiCalculateTotals']&&!window['wiCalculateTotals']._s)window['wiCalculateTotals'].apply(self,a);},400);};window['wiCalculateTotals']._s=1;
@@ -4799,12 +4797,7 @@ body.dark-mode .nav-links { background: #121a18 !important; }
       <button class="save-btn" onclick="changePassword()" style="width:100%;padding:0.6rem;background:#c49a6c;">🔐 Change Password</button>
     </div>
 
-    <div style="background:#f5f0ea;border-radius:16px;padding:1.2rem;margin-bottom:1rem;">
-      <h4 style="margin-bottom:1rem;color:#2c5a4a;">🌾 Makhana Product Photo</h4>
-      <div id="makhanaRetailImage" style="width:100%;height:120px;background:#e8e0d8;border-radius:10px;margin-bottom:0.7rem;display:flex;align-items:center;justify-content:center;overflow:hidden;font-size:2rem;">🌾</div>
-      <input type="file" id="makhanaPhotoUpload" accept="image/*" style="width:100%;padding:0.4rem;border:1px solid #ddd;border-radius:8px;margin-bottom:0.5rem;">
-      <button class="save-btn" onclick="uploadMakhanaPhoto()" style="width:100%;padding:0.6rem;background:#c49a6c;">📷 Upload Makhana Photo</button>
-    </div>
+
 
     <!-- ✅ DATA EXPORT SECTION -->
     <div style="background:#e8f5e9;border-radius:16px;padding:1.2rem;margin-bottom:1rem;border:1px solid #a5d6a7;">
@@ -4960,7 +4953,7 @@ let orders = [];
 let users = [];
 let bills = [];
 let bulkEnquiries = [], cart = [], currentUser = null;
-let settings = { defaultCourier: 40, freeMin: 999, whatsappNo: "919006606697", sellerStateCode: "10", qrCodeImage: null, upiId: "43459091963@sbi", bankAccount: "43459091963", bankName: "State Bank of India", bankIFSC: "SBIN0018623", accountName: "Nexdrop Solutions Pvt. Ltd.", makhanaImage: null };
+let settings = { defaultCourier: 40, freeMin: 999, whatsappNo: "919006606697", sellerStateCode: "10", qrCodeImage: null, upiId: "43459091963@sbi", bankAccount: "43459091963", bankName: "State Bank of India", bankIFSC: "SBIN0018623", accountName: "Nexdrop Solutions Pvt. Ltd." };
 
 // Default products image map (pexels URLs)
 var defaultProductImages = {
@@ -4993,7 +4986,7 @@ function loadData() {
         let b2 = localStorage.getItem('nexdrop_b2b'); if(b2) b2bProducts = JSON.parse(b2);
         let s = localStorage.getItem('nexdrop_settings'); if(s) settings = {...settings, ...JSON.parse(s)};
         let cu = localStorage.getItem('nexdrop_user'); if(cu) currentUser = JSON.parse(cu);
-        updateMakhanaImages(); updateStats();
+        updateStats();
         setTimeout(function() { if(typeof loadUnitsDisplay === 'function') loadUnitsDisplay(); }, 100);
     });
 }
@@ -5095,8 +5088,7 @@ function saveSettingsData() {
             { onConflict: 'key' }
         ).then(function(res){ if(res && res.error) console.log('Settings Supabase sync failed:', res.error.message); });
     } catch(e) { console.log('saveSettingsData Supabase error:', e.message); }
-    updateMakhanaImages();
-}
+    }
 function updateStats() {
     // Stock stats
     let lowStockCount = products.filter(p => p.stockQty !== null && p.stockQty !== undefined && p.stockQty <= 10 && p.stockQty > 0).length
@@ -5238,37 +5230,7 @@ function updateStats() {
     if(document.getElementById('statShipped')) document.getElementById('statShipped').innerText = orders.filter(o=>o.status==='Shipped').length;
     if(document.getElementById('statDelivered')) document.getElementById('statDelivered').innerText = orders.filter(o=>o.status==='Delivered').length;
 }
-function updateMakhanaImages() {
-    let retailImg = document.getElementById('makhanaRetailImage');
-    let b2bIcon = document.getElementById('makhanaB2BIcon');
-    if(retailImg && settings.makhanaImage) retailImg.innerHTML = `<img src="${settings.makhanaImage}" alt="Premium Makhana" style="width:100%; height:100%; object-fit:cover;">`;
-    if(b2bIcon && settings.makhanaImage) b2bIcon.innerHTML = `<img src="${settings.makhanaImage}" alt="Premium Makhana" style="width:80px; height:80px; object-fit:cover; border-radius:12px;">`;
-}
-function uploadMakhanaPhoto() {
-    let input = document.getElementById('makhanaPhotoUpload');
-    let file = input.files[0];
-    if(!file) { alert('Please select a photo!'); return; }
-    if(file.size > 5*1024*1024) { alert('Photo too large! Max 5MB'); return; }
-    let reader = new FileReader();
-    reader.onload = function(e) {
-        let img = new Image();
-        img.onload = function() {
-            let canvas = document.createElement('canvas');
-            let maxW = 600, maxH = 600, w = img.width, h = img.height;
-            if(w > maxW) { h = h * maxW / w; w = maxW; }
-            if(h > maxH) { w = w * maxH / h; h = maxH; }
-            canvas.width = w; canvas.height = h;
-            canvas.getContext('2d').drawImage(img, 0, 0, w, h);
-            settings.makhanaImage = canvas.toDataURL('image/jpeg', 0.7);
-            saveSettingsData();
-            updateMakhanaImages();
-            alert('Photo updated!');
-        };
-        img.src = e.target.result;
-    };
-    reader.readAsDataURL(file);
-    input.value = '';
-}
+
 
 function scrollToTop() { window.scrollTo({top:0, behavior:'smooth'}); }
 function scrollToProducts() { showModel('b2c'); document.getElementById('b2c-section').scrollIntoView({behavior:'smooth'}); }

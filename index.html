@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- 🔒 SECURITY PATCH v2.3 applied | v36.6 — Wholesale Add to Cart removed: grid card, product modal, stock manager — sirf View & Enquire + WhatsApp | v36.5 — Khata 8-bug fix: (1) ts-based entry delete (2) duplicate switchTab patch removed (3) reset orphan entries fix (4) WhatsApp blank URL guard (5) XSS in print window (6) khataOpenCustomer race condition (7) date field reset after entry | v36.4 — Fully Dynamic Categories: hardcoded Tea/Makhana tabs/stat-cards/filters sab hata diye, sab kuch getCategories() se dynamically generate hota hai — admin filter tabs, homepage tabs, B2B tabs, dashboard stat cards sab; filterAdminProducts/loadAdminProducts dyncat: support; switchToCategory dynamic; populateCategoryDropdowns full rebuild (no stale tabs) | v36.2 below -->
+<!-- 🔒 SECURITY PATCH v2.3 applied | v36.7 — Bug fixes: (1) sbSaveOrder upsert fix — timestamp ID Supabase mein properly store hoga, status update guarantee; (2) updateOrderStatus async fix — sbSaveOrder await karo taaki Supabase save pehle ho, status revert band | (2) "? Other" category stat card fix — normCat() se case/space normalization improve ki | v36.6 — Wholesale Add to Cart removed: grid card, product modal, stock manager — sirf View & Enquire + WhatsApp | v36.5 — Khata 8-bug fix: (1) ts-based entry delete (2) duplicate switchTab patch removed (3) reset orphan entries fix (4) WhatsApp blank URL guard (5) XSS in print window (6) khataOpenCustomer race condition (7) date field reset after entry | v36.4 — Fully Dynamic Categories: hardcoded Tea/Makhana tabs/stat-cards/filters sab hata diye, sab kuch getCategories() se dynamically generate hota hai — admin filter tabs, homepage tabs, B2B tabs, dashboard stat cards sab; filterAdminProducts/loadAdminProducts dyncat: support; switchToCategory dynamic; populateCategoryDropdowns full rebuild (no stale tabs) | v36.2 below -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <!-- 🔒 FIX #6: X-Content-Type-Options prevents MIME sniffing attacks -->
@@ -423,8 +423,9 @@ async function sbLoadOrders() {
 async function sbSaveOrder(order) {
     try {
         const row = {
+            // ✅ FIX v36.7: id include karo — timestamp ID Supabase bigint mein store hoga
+            id: order.id || undefined,
             user_email: order.userId || '',
-            // ✅ FIX: customer fields Supabase mein save karo
             customer_name: order.customerName || '',
             customer_phone: order.customerPhone || '',
             customer_address: order.customerAddress || '',
@@ -436,19 +437,16 @@ async function sbSaveOrder(order) {
             order_type: order.orderType || 'retail',
             stock_deducted: order.stockDeducted || false,
             admin_note: order.adminNote || '',
-            // ✅ FIX v26: coupon, discount, GST fields add karo
             coupon_code: order.couponCode || '',
             discount_amount: order.discountAmount || 0,
             courier: order.courier || 0,
             customer_gstin: order.customerGstin || '',
             customer_state_code: order.customerStateCode || ''
         };
-        if(order.id) {
-            await db.from('orders').update(row).eq('id', order.id);
-        } else {
-            const { data } = await db.from('orders').insert([row]).select();
-            if(data && data[0]) order.id = data[0].id;
-        }
+        // ✅ FIX v36.7: upsert use karo — same ID pe update, naya ID pe insert
+        const { data, error } = await db.from('orders').upsert([row], { onConflict: 'id' }).select();
+        if(error) throw new Error(error.message);
+        if(data && data[0] && !order.id) order.id = data[0].id;
         return order;
     } catch(e) {
         console.log('sbSaveOrder error:', e.message);
@@ -5143,9 +5141,12 @@ function updateStats() {
         ];
 
         let html = '';
-        let knownRetailCats = baseNames.map(b => ('retail '+b).toLowerCase());
-        let knownWholeCats  = baseNames.map(b => ('wholesale '+b).toLowerCase());
-        let knownBareCats   = baseNames.map(b => b.toLowerCase());
+        // ✅ FIX v36.7: normalize function — extra spaces + case handle
+        function normCat(s) { return (s||'').toLowerCase().replace(/\s+/g,' ').trim(); }
+
+        let knownRetailCats = baseNames.map(b => normCat('retail '+b));
+        let knownWholeCats  = baseNames.map(b => normCat('wholesale '+b));
+        let knownBareCats   = baseNames.map(b => normCat(b));
 
         baseNames.forEach((baseName, i) => {
             let retailCatName = 'Retail ' + baseName;
@@ -5153,12 +5154,12 @@ function updateStats() {
             let s = stylePool[i % stylePool.length];
 
             let retailStk = products.reduce((s,p) => {
-                let pc = (p.category||'').toLowerCase().trim();
-                return (pc === retailCatName.toLowerCase() || pc === baseName.toLowerCase()) ? s + (p.stockQty||0) : s;
+                let pc = normCat(p.category);
+                return (pc === normCat(retailCatName) || pc === normCat(baseName)) ? s + (p.stockQty||0) : s;
             }, 0);
             let wholesaleStk = b2bProducts.reduce((s,p) => {
-                let pc = (p.category||'').toLowerCase().trim();
-                return (pc === wholeCatName.toLowerCase() || pc === baseName.toLowerCase()) ? s + (p.stockQty||0) : s;
+                let pc = normCat(p.category);
+                return (pc === normCat(wholeCatName) || pc === normCat(baseName)) ? s + (p.stockQty||0) : s;
             }, 0);
 
             let safeBase = baseName.replace(/[^a-zA-Z0-9]/g,'_');
@@ -5178,8 +5179,8 @@ function updateStats() {
 
         // Uncategorized catch-all
         let allKnown = [...knownRetailCats,...knownWholeCats,...knownBareCats];
-        let uncatRetail = products.reduce((s,p) => !allKnown.includes((p.category||'').toLowerCase().trim()) ? s+(p.stockQty||0) : s, 0);
-        let uncatWhole  = b2bProducts.reduce((s,p) => !allKnown.includes((p.category||'').toLowerCase().trim()) ? s+(p.stockQty||0) : s, 0);
+        let uncatRetail = products.reduce((s,p) => !allKnown.includes(normCat(p.category)) ? s+(p.stockQty||0) : s, 0);
+        let uncatWhole  = b2bProducts.reduce((s,p) => !allKnown.includes(normCat(p.category)) ? s+(p.stockQty||0) : s, 0);
         if(uncatRetail > 0) html += `<div class="stat-card" style="background:linear-gradient(135deg,#f5f5f5,#eeeeee);border:2px dashed #bdbdbd;min-width:110px;"><div class="stat-number" style="font-size:1.5rem;color:#616161;">${uncatRetail}</div><div style="font-size:0.7rem;color:#616161;font-weight:600;">❓ Other<br><span style="font-size:0.62rem;opacity:0.8;">Retail</span></div></div>`;
         if(uncatWhole  > 0) html += `<div class="stat-card" style="background:linear-gradient(135deg,#f5f5f5,#eeeeee);border:2px dashed #bdbdbd;min-width:110px;"><div class="stat-number" style="font-size:1.5rem;color:#616161;">${uncatWhole}</div><div style="font-size:0.7rem;color:#616161;font-weight:600;">❓ Other<br><span style="font-size:0.62rem;opacity:0.8;">Wholesale</span></div></div>`;
 
@@ -7499,9 +7500,13 @@ function updateStatus(id, status) {
         showToast(restoreMsg, '#ff9800');
     }
     saveOrders();
-    sbSaveOrder(o); // ✅ FIX: Supabase mein bhi status update karo
-    loadAdminOrders();
-    updateStats();
+    // ✅ FIX v36.7: await sbSaveOrder taaki Supabase save pehle complete ho, phir UI refresh ho
+    // Warna auto-refresh 30s mein purana status overwrite kar deta tha
+    (async function() {
+        await sbSaveOrder(o);
+        loadAdminOrders();
+        updateStats();
+    })();
 }
 function deleteOrder(id) { if(confirm('Delete?')) { sbDeleteOrder(id); orders=orders.filter(o=>o.id!==id); saveOrders(); loadAdminOrders(); } }
 

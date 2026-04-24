@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- 🔒 SECURITY PATCH v2.4 applied | v36.8 — Audit fixes: (1) XSS fix: o.adminNote → esc(o.adminNote) in loadDashboard() — admin note user dashboard mein unescaped tha; (2) distLogin() brute-force guard added (_distLoginGuard: 5 attempts, 5min lockout, sessionStorage persist) — same as adminLoginGuard; (3) .single() → .maybeSingle() for reviews/suppliers/wi_bills/pb_bills in initSupabase — missing row pe throw hone wala error fix; (4) calcOrderGST() global scope mein move kiya — updateStats() ke andar nested tha, har call pe re-define hoti thi (performance fix); (5) loadAnalytics() date parsing fix — Indian DD/MM/YYYY locale format now supported (same as updateStats); (6) All 38 alert() calls → showToast() — checkout, adminLogin, distLogin, distRegister, distChangePassword, dealership, broadcast, file upload, adminLogout, slider manager, adminDist CRUD sab covered | v36.7 below -->
+<!-- 🔒 SECURITY PATCH v2.4 applied | v36.12 — GST+P&L fixes: (1) loadGSTReport() buyer state — order.customerStateCode pehle check (guest checkout IGST fix); (2) exportGSTCSV() same fix; (3) loadPnLStatement() revenue GST-exclusive — taxable amount use karo warna P&L overstated thi | v36.11 — Review fixes: loadReviewsFromSupabase .single()→.maybeSingle(), reviewAction confirm()→toast 2-step, product rating auto-update | v36.10 — Shipped confirm()→toast 2-step | v36.9 — applyCoupon stale cache, Khata hydration, deleteCoupon confirm()→toast | v36.8 — Audit fixes: (1) XSS fix: o.adminNote → esc(o.adminNote) in loadDashboard() — admin note user dashboard mein unescaped tha; (2) distLogin() brute-force guard added (_distLoginGuard: 5 attempts, 5min lockout, sessionStorage persist) — same as adminLoginGuard; (3) .single() → .maybeSingle() for reviews/suppliers/wi_bills/pb_bills in initSupabase — missing row pe throw hone wala error fix; (4) calcOrderGST() global scope mein move kiya — updateStats() ke andar nested tha, har call pe re-define hoti thi (performance fix); (5) loadAnalytics() date parsing fix — Indian DD/MM/YYYY locale format now supported (same as updateStats); (6) All 38 alert() calls → showToast() — checkout, adminLogin, distLogin, distRegister, distChangePassword, dealership, broadcast, file upload, adminLogout, slider manager, adminDist CRUD sab covered | v36.7 below -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <!-- 🔒 FIX #6: X-Content-Type-Options prevents MIME sniffing attacks -->
@@ -324,7 +324,8 @@ async function sbLoadProducts() {
                 priceUnit: p.price_unit || ''
             }));
             console.log('✅ ' + products.length + ' products Supabase se load hue!');
-            // ✅ FIX: Render home grid immediately as soon as products arrive from Supabase
+            // ✅ FIX: Render ALL grids immediately when products arrive from Supabase
+            if(typeof displayProducts === 'function') displayProducts();
             if(typeof displayHomeProducts === 'function') displayHomeProducts();
         }
     } catch(e) {
@@ -509,7 +510,7 @@ async function sbLoadBills() {
         } catch(fetchErr) {
             // DataCloneError ya network error — silently fallback
             console.log('sbLoadBills: Supabase fetch skipped, localStorage use hoga.');
-            if (bl) bills = JSON.parse(bl);
+            // ✅ FIX Audit: bl variable nahi hai — in-memory bills use karo
             return;
         }
         const { data, error } = result;
@@ -520,7 +521,7 @@ async function sbLoadBills() {
             } else {
                 console.log('sbLoadBills error:', error.message);
             }
-            if (bl) bills = JSON.parse(bl);
+            // ✅ FIX Audit: bl variable nahi hai — in-memory bills use karo
             return;
         }
         if (data && data.length > 0) {
@@ -553,13 +554,12 @@ async function sbLoadBills() {
             console.log('✅ ' + bills.length + ' bills Supabase se load hue!');
         } else {
             // Supabase mein koi bills nahi — localStorage check karo
-            if (bl) bills = JSON.parse(bl);
+            // ✅ FIX Audit: bl variable nahi hai — in-memory bills use karo
         }
     } catch(e) {
         // Any other unexpected error — silent fallback
         console.log('sbLoadBills unexpected error, localStorage use hoga:', e.message || e);
         try {
-            if (bl) bills = JSON.parse(bl);
         } catch(le) {}
     }
 }
@@ -655,13 +655,11 @@ async function sbLoadBulkEnquiries() {
             /* bulkEnquiries in-memory */
             console.log('✅ ' + bulkEnquiries.length + ' bulk enquiries Supabase se load hue!');
         } else {
-            // bulkEnquiries in-memory
-            if (b) bulkEnquiries = JSON.parse(b);
+            // ✅ FIX Audit: b variable nahi hai — in-memory bulkEnquiries use karo
         }
     } catch(e) {
         console.log('sbLoadBulkEnquiries error, localStorage fallback:', e.message);
-        // bulkEnquiries in-memory
-        if (b) bulkEnquiries = JSON.parse(b);
+        // ✅ FIX Audit: b variable nahi hai — in-memory bulkEnquiries use karo
     }
 }
 
@@ -791,9 +789,11 @@ async function initSupabase() {
         if (!b2Err && b2Data && b2Data.value) {
             let arr = typeof b2Data.value === 'string' ? JSON.parse(b2Data.value) : b2Data.value;
             if (Array.isArray(arr) && arr.length > 0) {
-                b2bProducts = arr;
-                b2bProducts = arr;
+                b2bProducts = arr; // ✅ FIX Audit W2: duplicate assignment removed
                 console.log('✅ B2B products Supabase settings se load hue:', arr.length);
+                // ✅ FIX: Render B2B grid immediately
+                if(typeof displayB2B === 'function') displayB2B();
+                if(typeof displayHomeProducts === 'function') displayHomeProducts();
             } else {
                 // b2bProducts already in-memory from Supabase
             }
@@ -840,16 +840,17 @@ async function initSupabase() {
         if(!khataCustomersErr && khataCustomersRes && khataCustomersRes.value) {
             let arr = typeof khataCustomersRes.value === 'string' ? JSON.parse(khataCustomersRes.value) : khataCustomersRes.value;
             if(Array.isArray(arr) && arr.length > 0) {
-                /* khata customers → Supabase via safeSave */
+                // ✅ FIX v36.9: _khataCustomers assign karo
+                _khataCustomers = arr;
                 console.log('✅ Khata customers Supabase se load hue:', arr.length);
-                // ✅ FIX v20: Har customer ke entries bhi load karo
+                // ✅ FIX v36.9: har customer ki entries bhi _khataEntries mein assign karo
                 for(const c of arr) {
                     try {
                         const { data: entryRes, error: entryErr } = await db.from('settings').select('value').eq('key', 'nexdrop_khata_entries_' + c.id).maybeSingle();
                         if(!entryErr && entryRes && entryRes.value) {
                             let ents = typeof entryRes.value === 'string' ? JSON.parse(entryRes.value) : entryRes.value;
                             if(Array.isArray(ents)) {
-                                /* khata entries → Supabase via safeSave */
+                                _khataEntries[c.id] = ents;
                             }
                         }
                     } catch(ke) { console.log('Khata entries load error for cid=' + c.id + ':', ke.message); }
@@ -873,7 +874,7 @@ async function initSupabase() {
         if(!notifsErr && notifsRes && notifsRes.value) {
             let arr = typeof notifsRes.value === 'string' ? JSON.parse(notifsRes.value) : notifsRes.value;
             if(Array.isArray(arr)) {
-                adminNotifs = (typeof adminNotifs !== 'undefined') ? arr : arr;
+                _adminNotifs = arr; // ✅ FIX Audit Bug4: adminNotifs undeclared — _adminNotifs use karo
                 console.log('✅ Admin notifs Supabase se load hue:', arr.length);
             }
         }
@@ -1477,7 +1478,7 @@ function _stripPasswords(usersArr) {
     .feature-title { font-weight: 700; font-size: 1.05rem; margin-bottom: 0.4rem; color: #1e2a2a; }
     .feature-desc { font-size: 0.82rem; color: #6b5e4a; line-height: 1.5; }
 
-    .tabs-container { display: flex; justify-content: center; margin: 2rem auto; padding: 0 1rem; }
+    .tabs-container { display: none !important; }
     .tabs { display: flex; gap: 1rem; background: #f0ebe4; padding: 0.3rem; border-radius: 60px; }
     .tab { padding: 0.6rem 1.8rem; background: transparent; border-radius: 50px; cursor: pointer; font-weight: 600; transition: all 0.3s; border: none; font-size: 0.88rem; }
     .tab.active { background: #2c5a4a; color: white; }
@@ -1822,7 +1823,7 @@ img { max-width: 100%; height: auto; }
 }
 
 /* --- TABS --- */
-.tabs-container { overflow-x: auto; -webkit-overflow-scrolling: touch; padding: 0; scrollbar-width: none; }
+.tabs-container { display: none !important; }
 .tabs-container::-webkit-scrollbar { display: none; }
 @media (max-width: 480px) {
     .tabs { gap: 0.25rem; padding: 0.25rem; }
@@ -2175,7 +2176,7 @@ body.dark-mode .nav-links { background: #121a18 !important; }
 </div>
 
 <!-- B2B -->
-<div id="b2b-section" class="section" style="display:none;">
+<div id="b2b-section" class="section" style="display:block;">
     <div class="b2b-section">
         <h2 class="section-title">🏭 Wholesale Products</h2>
         <p style="text-align:center;margin-bottom:1.5rem;color:#6b5e4a;font-size:0.92rem;">Special pricing for businesses, hotels, cafes, and resellers</p>
@@ -5240,7 +5241,7 @@ function updateStats() {
 
 
 function scrollToTop() { window.scrollTo({top:0, behavior:'smooth'}); }
-function scrollToProducts() { showModel('b2c'); document.getElementById('b2c-section').scrollIntoView({behavior:'smooth'}); }
+function scrollToProducts() { document.getElementById('b2c-section').scrollIntoView({behavior:'smooth'}); }
 function scrollToB2B() { showModel('b2b'); document.getElementById('b2b-section').scrollIntoView({behavior:'smooth'}); }
 function scrollToAbout() {
     document.getElementById('about-section').scrollIntoView({behavior:'smooth'});
@@ -5252,18 +5253,11 @@ function toggleNav() { let nl = document.getElementById('navLinks'); nl.classLis
 function closeNav() { document.getElementById('navLinks').classList.remove('open'); document.getElementById('menuBtn').innerText = '☰'; }
 function navGo(fn) { fn(); closeNav(); }
 function showModel(model) {
-    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-    if(model === 'b2c') {
-        document.querySelector('.tab:first-child').classList.add('active');
-        document.getElementById('b2c-section').style.display = 'block';
-        document.getElementById('b2b-section').style.display = 'none';
-        displayProducts();
-    } else {
-        document.querySelectorAll('.tab')[1].classList.add('active');
-        document.getElementById('b2c-section').style.display = 'none';
-        document.getElementById('b2b-section').style.display = 'block';
-        displayB2B();
-    }
+    // Toggle removed — both sections always visible
+    document.getElementById('b2c-section').style.display = 'block';
+    document.getElementById('b2b-section').style.display = 'block';
+    displayProducts();
+    displayB2B();
 }
 function renderHighlights(highlights, type) {
     if(!highlights || !highlights.length) return '';
@@ -5913,7 +5907,9 @@ async function checkout() {
         couponCode: activeCoupon ? activeCoupon.code : '',
         discountAmount: couponDiscount || 0,
         customerGstin: (currentUser && currentUser.gstin) ? currentUser.gstin : '',
-        customerStateCode: (currentUser && currentUser.stateCode) ? currentUser.stateCode : ''
+        customerStateCode: (currentUser && currentUser.stateCode) ? currentUser.stateCode : '',
+        // ✅ FIX Audit Bug3: customerStateName add kiya — GST bill IGST/CGST detection ke liye
+        customerStateName: (currentUser && currentUser.stateName) ? currentUser.stateName : ''
     };
     orders.unshift(order);
     // ✅ FIX: try/catch — Supabase failure pe graceful error + localStorage fallback
@@ -7486,8 +7482,16 @@ function updateStatus(id, status) {
             }
         }, 400);
         setTimeout(() => {
-            if(confirm('✅ Order #' + String(o.id).slice(-6) + ' Shipped!\nStock auto-deducted.\n\nSend Bill to customer via WhatsApp?')) {
+            // ✅ FIX v36.10: confirm() mobile pe block hota tha — toast 2-step
+            let ordShortId = String(o.id).slice(-6);
+            let billKey = '_billWASend_' + o.id;
+            if(window[billKey]) {
+                window[billKey] = false;
                 openBillModal(o.id, true);
+            } else {
+                window[billKey] = true;
+                showToast('✅ Order #' + ordShortId + ' Shipped! Bill bhejna hai? Dobara click karein.', '#2196f3');
+                setTimeout(function() { if(window[billKey]) window[billKey] = false; }, 5000);
             }
         }, 900);
     }
@@ -9763,8 +9767,16 @@ document.addEventListener('DOMContentLoaded', function() {
     // Load full data from Supabase — displayHomeProducts() is also called inside initSupabase()
     loadData();
     // Safety fallback: re-render after 2s and 5s in case Supabase takes time
-    setTimeout(function() { if(typeof displayHomeProducts === 'function') displayHomeProducts(); }, 2000);
-    setTimeout(function() { if(typeof displayHomeProducts === 'function') displayHomeProducts(); }, 5000);
+    setTimeout(function() {
+        if(typeof displayProducts === 'function') displayProducts();
+        if(typeof displayB2B === 'function') displayB2B();
+        if(typeof displayHomeProducts === 'function') displayHomeProducts();
+    }, 2000);
+    setTimeout(function() {
+        if(typeof displayProducts === 'function') displayProducts();
+        if(typeof displayB2B === 'function') displayB2B();
+        if(typeof displayHomeProducts === 'function') displayHomeProducts();
+    }, 5000);
 });
 
 // ---- 9. IMAGE LAZY LOADING (IntersectionObserver — NO localStorage) ----
@@ -10022,11 +10034,13 @@ function loadGSTReport() {
             if(taxable === 0) { taxable = Math.round(total / 1.05 * 100) / 100; gstTotal = Math.round((total - taxable) * 100) / 100; }
             taxable = Math.round(taxable * 100) / 100;
             gstTotal = Math.round(gstTotal * 100) / 100;
-            // ✅ FIX: buyer state se IGST vs CGST+SGST decide karo
-            // Retail mein buyer state: user ke stateCode se ya GSTIN se
-            let buyerUser = users.find(u => u.email === o.userId || u.phone === o.customerPhone);
-            let buyerSC = (buyerUser && buyerUser.stateCode) ? buyerUser.stateCode
-                : (buyerUser && buyerUser.gstin && buyerUser.gstin.length >= 2 ? buyerUser.gstin.substring(0,2) : _sellerSC);
+            // ✅ FIX v36.12: buyer state priority — order.customerStateCode pehle check karo (guest checkout fix)
+            let buyerSC = o.customerStateCode && o.customerStateCode.length >= 2 ? o.customerStateCode
+                : (function() {
+                    let buyerUser = users.find(u => u.email === o.userId || u.phone === o.customerPhone);
+                    return (buyerUser && buyerUser.stateCode) ? buyerUser.stateCode
+                        : (buyerUser && buyerUser.gstin && buyerUser.gstin.length >= 2 ? buyerUser.gstin.substring(0,2) : _sellerSC);
+                })();
             let isInter = (buyerSC !== _sellerSC);
             let cgst = isInter ? 0 : Math.round(gstTotal/2*100)/100;
             let sgst = isInter ? 0 : Math.round(gstTotal/2*100)/100;
@@ -10149,8 +10163,8 @@ function exportGSTCSV() {
                 taxable+=ta; gst+=Math.round((itemAmt-ta)*100)/100;
             });
             if(taxable===0){taxable=Math.round(total/1.05*100)/100; gst=Math.round((total-taxable)*100)/100;}
-            let buyerUser=users.find(u=>u.email===o.userId||u.phone===o.customerPhone);
-            let buyerSC=(buyerUser&&buyerUser.stateCode)?buyerUser.stateCode:(buyerUser&&buyerUser.gstin&&buyerUser.gstin.length>=2?buyerUser.gstin.substring(0,2):_sellerSC);
+            // ✅ FIX v36.12: buyer state priority — order.customerStateCode pehle (guest checkout fix)
+            let buyerSC=(o.customerStateCode&&o.customerStateCode.length>=2)?o.customerStateCode:(function(){let u=users.find(u=>u.email===o.userId||u.phone===o.customerPhone);return (u&&u.stateCode)?u.stateCode:(u&&u.gstin&&u.gstin.length>=2?u.gstin.substring(0,2):_sellerSC);})();
             let isInter=(buyerSC!==_sellerSC);
             let cgst=isInter?0:(gst/2); let sgst=isInter?0:(gst/2); let igst=isInter?gst:0;
             let bill=localBills.find(b=>b.orderId===o.id); let billNo=bill?bill.billNo:'INV-'+o.id;
@@ -10934,8 +10948,7 @@ function wiGenerateInvoice() {
 
     // ✅ Wholesale Stock Auto-Minus: item name se B2B product match karke stock minus karo
     let stockDeducted = [];
-    let b2bRaw = null; // b2bProducts used directly
-    if(b2bRaw) b2bProducts = JSON.parse(b2bRaw);
+    // ✅ FIX Audit W4: b2bRaw dead code removed — b2bProducts directly used
     d.items.forEach(item => {
         let itemNameLower = item.name.trim().toLowerCase();
         let matched = b2bProducts.find(p => p.name && p.name.trim().toLowerCase() === itemNameLower);
@@ -12350,21 +12363,26 @@ function toggleCouponStatus(code) {
     showToast(c.active ? '✅ Coupon enabled!' : '⏸️ Coupon disabled!', '#c2185b');
 }
 function deleteCoupon(code) {
-    if(!confirm('Delete this coupon?')) return;
-    let coupons = getCoupons();
-    // ✅ FIX: index ke bajaye code se remove karo
-    const removed = coupons.find(c => c.code === code);
-    const updated = coupons.filter(c => c.code !== code);
-    saveCoupons(updated);
-    // Supabase coupons table se bhi delete karo
-    if(removed && removed.code) {
-        try {
-            db.from('coupons').delete().eq('code', removed.code)
-                .then(function(res){ if(res && res.error) console.log('Coupon Supabase delete failed:', res.error.message); });
-        } catch(e) { console.log('deleteCoupon Supabase error:', e.message); }
+    // ✅ FIX v36.9: confirm() mobile pe block hota tha — toast 2-step
+    if(window._deleteCouponPending === code) {
+        window._deleteCouponPending = null;
+        let coupons = getCoupons();
+        const removed = coupons.find(c => c.code === code);
+        const updated = coupons.filter(c => c.code !== code);
+        saveCoupons(updated);
+        if(removed && removed.code) {
+            try {
+                db.from('coupons').delete().eq('code', removed.code)
+                    .then(function(res){ if(res && res.error) console.log('Coupon Supabase delete failed:', res.error.message); });
+            } catch(e) { console.log('deleteCoupon Supabase error:', e.message); }
+        }
+        loadCouponsList();
+        showToast('🗑️ Coupon deleted', '#ff9800');
+    } else {
+        window._deleteCouponPending = code;
+        showToast('⚠️ "' + code + '" delete karna hai? Dobara click karein confirm ke liye.', '#ff9800');
+        setTimeout(function() { if(window._deleteCouponPending === code) window._deleteCouponPending = null; }, 4000);
     }
-    loadCouponsList();
-    showToast('🗑️ Coupon deleted', '#ff9800');
 }
 
 // Apply Coupon at Cart (User side)
@@ -12381,7 +12399,8 @@ async function applyCoupon() {
                     usedCount: c.used_count||0, expiry: c.expiry||'',
                     desc: c.description||'', active: c.active!==false };
             });
-            /* coupons saved via Supabase */
+            // ✅ FIX v36.9: _coupons update karo — warna stale cache use hoti thi
+            _coupons = mapped;
         }
     } catch(e) { console.log('applyCoupon fresh load error:', e.message); }
     let coupons = getCoupons();
@@ -12560,7 +12579,8 @@ function saveReviews(arr) {
 }
 async function loadReviewsFromSupabase() {
     try {
-        const { data, error } = await db.from('settings').select('value').eq('key', 'nexdrop_reviews').single();
+        // ✅ FIX v36.11: .single() → .maybeSingle() — row missing pe crash fix
+        const { data, error } = await db.from('settings').select('value').eq('key', 'nexdrop_reviews').maybeSingle();
         if(error) throw error;
         if(data && data.value) {
             const arr = typeof data.value === 'string' ? JSON.parse(data.value) : data.value;
@@ -12568,7 +12588,7 @@ async function loadReviewsFromSupabase() {
             return arr;
         }
     } catch(e) {
-        console.log('Reviews Supabase load failed, using localStorage:', e.message);
+        console.log('Reviews Supabase load failed:', e.message);
     }
     return _reviews.length ? _reviews : [];
 }
@@ -12771,16 +12791,37 @@ function pdmSubmitReview() {
 function reviewAction(id, action) {
     let reviews = getReviews();
     if(action === 'delete') {
-        if(!confirm('Delete this review?')) return;
-        saveReviews(reviews.filter(r=>r.id!==id));
-    } else {
-        let r = reviews.find(r=>r.id===id); if(!r) return;
-        r.status = action;
-        saveReviews(reviews);
+        // ✅ FIX v36.11: confirm() mobile pe block hota tha — toast 2-step
+        if(window._deleteReviewPending === id) {
+            window._deleteReviewPending = null;
+            saveReviews(reviews.filter(r => r.id !== id));
+            loadAdminReviews();
+            renderHomepageReviews();
+            showToast('🗑️ Review deleted!', '#ff9800');
+        } else {
+            window._deleteReviewPending = id;
+            showToast('⚠️ Review delete karna hai? Dobara click karein confirm ke liye.', '#ff9800');
+            setTimeout(function() { if(window._deleteReviewPending === id) window._deleteReviewPending = null; }, 4000);
+        }
+        return;
     }
+    let r = reviews.find(r => r.id === id); if(!r) return;
+    r.status = action;
+    saveReviews(reviews);
+    // ✅ FIX v36.11: Product rating auto-update jab review approve/hide ho
+    (function updateProductRating(productName) {
+        let approvedRevs = reviews.filter(rv => rv.productName === productName && rv.status === 'approved');
+        let prod = products.find(p => p.name === productName) || b2bProducts.find(p => p.name === productName);
+        if(prod) {
+            prod.rating = approvedRevs.length > 0 ? Math.round((approvedRevs.reduce((s,rv)=>s+rv.rating,0)/approvedRevs.length)*10)/10 : 0;
+            prod.ratingCount = approvedRevs.length;
+            saveProducts(); saveB2B();
+            displayProducts(); displayB2B();
+        }
+    })(r.productName);
     loadAdminReviews();
-    renderHomepageReviews(); // Homepage par turant update karo
-    showToast(action === 'approved' ? '✅ Review approved! It is now visible on the homepage.' : '✅ Review updated!','#f57f17');
+    renderHomepageReviews();
+    showToast(action === 'approved' ? '✅ Review approved! Product rating update ho gayi.' : '🚫 Review hidden!', '#f57f17');
 }
 
 // ✅ Approved reviews homepage par render karo
@@ -12824,7 +12865,7 @@ function renderHomepageReviews() {
 // ──────────────────────────────────────────────
 function getNotifs() { return _adminNotifs; }
 function saveNotifs(arr) {
-    adminNotifs = (typeof adminNotifs !== 'undefined') ? arr : arr;
+    _adminNotifs = arr; // ✅ FIX Audit Bug4: adminNotifs undeclared — _adminNotifs use karo
     // ✅ FIX v21: Supabase sync
     try {
         db.from('settings').upsert(
@@ -13172,7 +13213,18 @@ function loadPnLStatement() {
         let d = o.date ? new Date(o.date) : null;
         if(!d || d.getFullYear() !== year) return;
         let m = d.getMonth();
-        retailByMonth[m] += parseTotal(o.total);
+        // ✅ FIX v36.12: GST-exclusive taxable revenue — warna P&L overstated hoti thi
+        let orderTotal = parseTotal(o.total);
+        let gstAmt = 0;
+        (o.items||[]).forEach(function(item) {
+            let prod = products.find(p => p.id===item.productId||p.name===item.name)
+                    || b2bProducts.find(p => p.id===item.productId||p.name===item.name);
+            let slab = (prod && prod.gstSlab != null) ? prod.gstSlab : 5;
+            let itemAmt = (item.price||0)*(item.quantity||1);
+            gstAmt += Math.round((itemAmt - itemAmt/(1+slab/100))*100)/100;
+        });
+        if(gstAmt === 0 && orderTotal > 0) gstAmt = Math.round(orderTotal*5/105*100)/100;
+        retailByMonth[m] += Math.round((orderTotal - gstAmt)*100)/100;
         retailOrdersByMonth[m]++;
     });
 

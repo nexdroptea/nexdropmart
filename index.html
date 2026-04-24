@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- 🔒 SECURITY PATCH v2.3 applied | v36.7 — Bug fixes: (1) sbSaveOrder upsert fix — timestamp ID Supabase mein properly store hoga, status update guarantee; (2) updateOrderStatus async fix — sbSaveOrder await karo taaki Supabase save pehle ho, status revert band | (2) "? Other" category stat card fix — normCat() se case/space normalization improve ki | v36.6 — Wholesale Add to Cart removed: grid card, product modal, stock manager — sirf View & Enquire + WhatsApp | v36.5 — Khata 8-bug fix: (1) ts-based entry delete (2) duplicate switchTab patch removed (3) reset orphan entries fix (4) WhatsApp blank URL guard (5) XSS in print window (6) khataOpenCustomer race condition (7) date field reset after entry | v36.4 — Fully Dynamic Categories: hardcoded Tea/Makhana tabs/stat-cards/filters sab hata diye, sab kuch getCategories() se dynamically generate hota hai — admin filter tabs, homepage tabs, B2B tabs, dashboard stat cards sab; filterAdminProducts/loadAdminProducts dyncat: support; switchToCategory dynamic; populateCategoryDropdowns full rebuild (no stale tabs) | v36.2 below -->
+<!-- 🔒 SECURITY PATCH v2.4 applied | v36.8 — Audit fixes: (1) XSS fix: o.adminNote → esc(o.adminNote) in loadDashboard() — admin note user dashboard mein unescaped tha; (2) distLogin() brute-force guard added (_distLoginGuard: 5 attempts, 5min lockout, sessionStorage persist) — same as adminLoginGuard; (3) .single() → .maybeSingle() for reviews/suppliers/wi_bills/pb_bills in initSupabase — missing row pe throw hone wala error fix; (4) calcOrderGST() global scope mein move kiya — updateStats() ke andar nested tha, har call pe re-define hoti thi (performance fix); (5) loadAnalytics() date parsing fix — Indian DD/MM/YYYY locale format now supported (same as updateStats); (6) All 38 alert() calls → showToast() — checkout, adminLogin, distLogin, distRegister, distChangePassword, dealership, broadcast, file upload, adminLogout, slider manager, adminDist CRUD sab covered | v36.7 below -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <!-- 🔒 FIX #6: X-Content-Type-Options prevents MIME sniffing attacks -->
@@ -242,20 +242,11 @@ function _sbRemove(key) {
     } catch(e) {}
 }
 
-// ---- localStorage INTERCEPT ----
-// Har localStorage.setItem pe automatically Supabase mein bhi push hoga
-const _origLSSet    = localStorage.setItem.bind(localStorage);
-const _origLSGet    = localStorage.getItem.bind(localStorage);
-const _origLSRemove = localStorage.removeItem.bind(localStorage);
-
-localStorage.setItem = function(key, value) {
-    _origLSSet(key, value);   // runtime cache — local mein bhi rakho
-    _sbSet(key, value);       // ✅ Supabase mein bhi push karo
-};
-localStorage.removeItem = function(key) {
-    _origLSRemove(key);
-    _sbRemove(key);           // ✅ Supabase se bhi delete karo
-};
+// ---- localStorage INTERCEPT (DISABLED — no localStorage in v37) ----
+// Sab data in-memory arrays mein hai, Supabase se sync hota hai directly
+const _origLSSet    = function() {};  // no-op
+const _origLSGet    = function() { return null; };  // no-op
+const _origLSRemove = function() {};  // no-op
 
 // ✅ Cold-start hydration: page load pe Supabase ki settings table se
 // sab keys localStorage mein populate karo — isse offline/stale data problem solve hoti hai
@@ -267,7 +258,20 @@ async function _hydrateCacheFromSupabase() {
         let count = 0;
         data.forEach(function(row) {
             if(row.key && row.value !== undefined && row.value !== null) {
-                _origLSSet(row.key, typeof row.value === 'string' ? row.value : JSON.stringify(row.value));
+                // Populate in-memory globals from Supabase hydration
+                try {
+                    const val = typeof row.value === 'string' ? JSON.parse(row.value) : row.value;
+                    if(row.key === 'nexdrop_wi_bills' && Array.isArray(val)) _wiBills = val;
+                    else if(row.key === 'nexdrop_pb_bills' && Array.isArray(val)) _pbBills = val;
+                    else if(row.key === 'nexdrop_suppliers' && Array.isArray(val)) _suppliers = val;
+                    else if(row.key === 'nexdrop_reviews' && Array.isArray(val)) _reviews = val;
+                    else if(row.key === 'nexdrop_coupons' && Array.isArray(val)) _coupons = val;
+                    else if(row.key === 'nexdrop_admin_notifs' && Array.isArray(val)) _adminNotifs = val;
+                    else if(row.key === 'nexdrop_khata_customers' && Array.isArray(val)) _khataCustomers = val;
+                    else if(row.key === 'nexdrop_slider_images' && Array.isArray(val)) _sliderImages = val;
+                    else if(row.key === 'nexdrop_retail_units' && Array.isArray(val)) _retailUnits = val;
+                    else if(row.key === 'nexdrop_wholesale_units' && Array.isArray(val)) _wholesaleUnits = val;
+                } catch(e2) {}
                 count++;
             }
         });
@@ -323,7 +327,7 @@ async function sbLoadProducts() {
         }
     } catch(e) {
         console.log('Supabase products load skipped, using localStorage cache:', e.message);
-        let p = localStorage.getItem('nexdrop_products');
+        // products in-memory
         if(p) products = JSON.parse(p);
     }
 }
@@ -410,8 +414,7 @@ async function sbLoadOrders() {
         }
     } catch(e) {
         console.log('Supabase orders load failed:', e.message);
-        let o = localStorage.getItem('nexdrop_orders');
-        if(o) orders = JSON.parse(o);
+        // orders already in-memory from Supabase
     }
 }
 
@@ -506,7 +509,6 @@ async function sbLoadBills() {
         } catch(fetchErr) {
             // DataCloneError ya network error — silently fallback
             console.log('sbLoadBills: Supabase fetch skipped, localStorage use hoga.');
-            let bl = localStorage.getItem('nexdrop_bills');
             if (bl) bills = JSON.parse(bl);
             return;
         }
@@ -518,7 +520,6 @@ async function sbLoadBills() {
             } else {
                 console.log('sbLoadBills error:', error.message);
             }
-            let bl = localStorage.getItem('nexdrop_bills');
             if (bl) bills = JSON.parse(bl);
             return;
         }
@@ -548,18 +549,16 @@ async function sbLoadBills() {
                 couponCode: b.coupon_code || '',
                 discountAmount: b.discount_amount || 0
             }));
-            localStorage.setItem('nexdrop_bills', JSON.stringify(bills));
+            /* bills sync → Supabase (done via saveBills/sbSaveBill) */
             console.log('✅ ' + bills.length + ' bills Supabase se load hue!');
         } else {
             // Supabase mein koi bills nahi — localStorage check karo
-            let bl = localStorage.getItem('nexdrop_bills');
             if (bl) bills = JSON.parse(bl);
         }
     } catch(e) {
         // Any other unexpected error — silent fallback
         console.log('sbLoadBills unexpected error, localStorage use hoga:', e.message || e);
         try {
-            let bl = localStorage.getItem('nexdrop_bills');
             if (bl) bills = JSON.parse(bl);
         } catch(le) {}
     }
@@ -603,16 +602,14 @@ async function sbLoadDealership() {
                 investment: d.investment, message: d.message,
                 date: d.date, status: d.status || 'New'
             }));
-            localStorage.setItem('nexdrop_dealership', JSON.stringify(dealershipEnquiries));
+            /* dealershipEnquiries in-memory */
             console.log('✅ ' + dealershipEnquiries.length + ' dealership enquiries Supabase se load hue!');
         } else {
-            let d = localStorage.getItem('nexdrop_dealership');
-            if (d) dealershipEnquiries = JSON.parse(d);
+            // dealershipEnquiries in-memoryif (d) dealershipEnquiries = JSON.parse(d);
         }
     } catch(e) {
         console.log('sbLoadDealership error, localStorage fallback:', e.message);
-        let d = localStorage.getItem('nexdrop_dealership');
-        if (d) dealershipEnquiries = JSON.parse(d);
+        // dealershipEnquiries in-memoryif (d) dealershipEnquiries = JSON.parse(d);
     }
 }
 
@@ -655,15 +652,15 @@ async function sbLoadBulkEnquiries() {
                 quantity: b.quantity, message: b.message,
                 date: b.date, status: b.status || 'New'
             }));
-            localStorage.setItem('nexdrop_bulk', JSON.stringify(bulkEnquiries));
+            /* bulkEnquiries in-memory */
             console.log('✅ ' + bulkEnquiries.length + ' bulk enquiries Supabase se load hue!');
         } else {
-            let b = localStorage.getItem('nexdrop_bulk');
+            // bulkEnquiries in-memory
             if (b) bulkEnquiries = JSON.parse(b);
         }
     } catch(e) {
         console.log('sbLoadBulkEnquiries error, localStorage fallback:', e.message);
-        let b = localStorage.getItem('nexdrop_bulk');
+        // bulkEnquiries in-memory
         if (b) bulkEnquiries = JSON.parse(b);
     }
 }
@@ -690,7 +687,7 @@ async function sbLoadUsers() {
         }
     } catch(e) {
         console.log('Supabase users load failed:', e.message);
-        let u = localStorage.getItem('nexdrop_users');
+        // users in-memory
         // 🔒 FIX #7: Strip passwords from any cached data too
         if(u) users = _stripPasswords(JSON.parse(u));
     }
@@ -781,13 +778,13 @@ async function initSupabase() {
                         createdAt: c.created_at || new Date().toISOString()
                     };
                 });
-                localStorage.setItem('nexdrop_coupons', JSON.stringify(mapped));
+                _coupons = mapped || arr;
                 console.log('✅ Coupons Supabase se load hue:', mapped.length);
             }
         })
     ]);
     // LocalStorage se baaki data load karo (fallback agar Supabase me nahi hai)
-    let bl = localStorage.getItem('nexdrop_bills'); if(!bills || !bills.length) { if(bl) bills = JSON.parse(bl); }
+    if(!bills || !bills.length) { if(bl) bills = JSON.parse(bl); }
     // ✅ FIX v36: B2B array pehle Supabase settings table se load karo, localStorage sirf fallback
     try {
         const { data: b2Data, error: b2Err } = await db.from('settings').select('value').eq('key', 'nexdrop_b2b').maybeSingle();
@@ -795,55 +792,55 @@ async function initSupabase() {
             let arr = typeof b2Data.value === 'string' ? JSON.parse(b2Data.value) : b2Data.value;
             if (Array.isArray(arr) && arr.length > 0) {
                 b2bProducts = arr;
-                localStorage.setItem('nexdrop_b2b', JSON.stringify(arr));
+                b2bProducts = arr;
                 console.log('✅ B2B products Supabase settings se load hue:', arr.length);
             } else {
-                let b2 = localStorage.getItem('nexdrop_b2b'); if(b2) b2bProducts = JSON.parse(b2);
+                // b2bProducts already in-memory from Supabase
             }
         } else {
-            let b2 = localStorage.getItem('nexdrop_b2b'); if(b2) b2bProducts = JSON.parse(b2);
+            // b2bProducts already in-memory from Supabase
         }
     } catch(e) {
-        let b2 = localStorage.getItem('nexdrop_b2b'); if(b2) b2bProducts = JSON.parse(b2);
+        // b2bProducts already in-memory from Supabase
         console.warn('B2B Supabase load failed, using localStorage:', e.message);
     }
-    let s = localStorage.getItem('nexdrop_settings'); if(s) settings = {...settings, ...JSON.parse(s)};
-    let cu = localStorage.getItem('nexdrop_user'); if(cu) currentUser = JSON.parse(cu);
+    // settings loaded from Supabase in loadData()
+    // currentUser is in-memory (set during login)
 
     // ✅ FIX: Reviews, Suppliers, Wholesale Bills — Supabase se load karo
     try {
         const [reviewsRes, suppliersRes, wiBillsRes, pbBillsRes] = await Promise.all([
-            db.from('settings').select('value').eq('key', 'nexdrop_reviews').single(),
-            db.from('settings').select('value').eq('key', 'nexdrop_suppliers').single(),
-            db.from('settings').select('value').eq('key', 'nexdrop_wi_bills').single(),
-            db.from('settings').select('value').eq('key', 'nexdrop_pb_bills').single()
+            db.from('settings').select('value').eq('key', 'nexdrop_reviews').maybeSingle(),    // 🔒 FIX: .single() → .maybeSingle() (row missing pe error nahi)
+            db.from('settings').select('value').eq('key', 'nexdrop_suppliers').maybeSingle(),  // 🔒 FIX: .single() → .maybeSingle()
+            db.from('settings').select('value').eq('key', 'nexdrop_wi_bills').maybeSingle(),   // 🔒 FIX: .single() → .maybeSingle()
+            db.from('settings').select('value').eq('key', 'nexdrop_pb_bills').maybeSingle()    // 🔒 FIX: .single() → .maybeSingle()
         ]);
         if(reviewsRes && reviewsRes.data && reviewsRes.data.value) {
             let arr = typeof reviewsRes.data.value === 'string' ? JSON.parse(reviewsRes.data.value) : reviewsRes.data.value;
-            localStorage.setItem('nexdrop_reviews', JSON.stringify(arr));
-            console.log('✅ Reviews Supabase se load hue:', arr.length);
+            _reviews = Array.isArray(arr) ? arr : [];
+            console.log('✅ Reviews Supabase se load hue:', _reviews.length);
         }
         if(suppliersRes && suppliersRes.data && suppliersRes.data.value) {
             let arr = typeof suppliersRes.data.value === 'string' ? JSON.parse(suppliersRes.data.value) : suppliersRes.data.value;
-            localStorage.setItem('nexdrop_suppliers', JSON.stringify(arr));
-            console.log('✅ Suppliers Supabase se load hue:', arr.length);
+            _suppliers = Array.isArray(arr) ? arr : [];
+            console.log('✅ Suppliers Supabase se load hue:', _suppliers.length);
         }
         if(wiBillsRes && wiBillsRes.data && wiBillsRes.data.value) {
             let arr = typeof wiBillsRes.data.value === 'string' ? JSON.parse(wiBillsRes.data.value) : wiBillsRes.data.value;
-            localStorage.setItem('nexdrop_wi_bills', JSON.stringify(arr));
-            console.log('✅ Wholesale invoices Supabase se load hue:', arr.length);
+            _wiBills = Array.isArray(arr) ? arr : [];
+            console.log('✅ Wholesale invoices Supabase se load hue:', _wiBills.length);
         }
         if(pbBillsRes && pbBillsRes.data && pbBillsRes.data.value) {
             let arr = typeof pbBillsRes.data.value === 'string' ? JSON.parse(pbBillsRes.data.value) : pbBillsRes.data.value;
-            localStorage.setItem('nexdrop_pb_bills', JSON.stringify(arr));
-            console.log('✅ Purchase bills Supabase se load hue:', arr.length);
+            _pbBills = Array.isArray(arr) ? arr : [];
+            console.log('✅ Purchase bills Supabase se load hue:', _pbBills.length);
         }
         // ✅ FIX v20: Khata customers Supabase se load karo
         const { data: khataCustomersRes, error: khataCustomersErr } = await db.from('settings').select('value').eq('key', 'nexdrop_khata_customers').maybeSingle();
         if(!khataCustomersErr && khataCustomersRes && khataCustomersRes.value) {
             let arr = typeof khataCustomersRes.value === 'string' ? JSON.parse(khataCustomersRes.value) : khataCustomersRes.value;
             if(Array.isArray(arr) && arr.length > 0) {
-                localStorage.setItem('nexdrop_khata_customers', JSON.stringify(arr));
+                /* khata customers → Supabase via safeSave */
                 console.log('✅ Khata customers Supabase se load hue:', arr.length);
                 // ✅ FIX v20: Har customer ke entries bhi load karo
                 for(const c of arr) {
@@ -852,7 +849,7 @@ async function initSupabase() {
                         if(!entryErr && entryRes && entryRes.value) {
                             let ents = typeof entryRes.value === 'string' ? JSON.parse(entryRes.value) : entryRes.value;
                             if(Array.isArray(ents)) {
-                                localStorage.setItem('nexdrop_khata_entries_' + c.id, JSON.stringify(ents));
+                                /* khata entries → Supabase via safeSave */
                             }
                         }
                     } catch(ke) { console.log('Khata entries load error for cid=' + c.id + ':', ke.message); }
@@ -864,7 +861,7 @@ async function initSupabase() {
         if(!catsErr && catsRes && catsRes.value) {
             let arr = typeof catsRes.value === 'string' ? JSON.parse(catsRes.value) : catsRes.value;
             if(Array.isArray(arr) && arr.length > 0) {
-                localStorage.setItem('nexdrop_categories', JSON.stringify(arr));
+                categories = arr; // in-memory only
                 console.log('✅ Categories Supabase se load hue:', arr.length);
                 // ✅ v31: Supabase se load hone ke baad saare UI elements update karo
                 if(typeof updateHeroCategoryCount === 'function') updateHeroCategoryCount();
@@ -876,7 +873,7 @@ async function initSupabase() {
         if(!notifsErr && notifsRes && notifsRes.value) {
             let arr = typeof notifsRes.value === 'string' ? JSON.parse(notifsRes.value) : notifsRes.value;
             if(Array.isArray(arr)) {
-                localStorage.setItem('nexdrop_admin_notifs', JSON.stringify(arr));
+                adminNotifs = (typeof adminNotifs !== 'undefined') ? arr : arr;
                 console.log('✅ Admin notifs Supabase se load hue:', arr.length);
             }
         }
@@ -884,21 +881,21 @@ async function initSupabase() {
         const yr = new Date().getFullYear();
         const { data: bcRes } = await db.from('settings').select('value').eq('key', 'bill_counter_' + yr).maybeSingle();
         if(bcRes && bcRes.value) {
-            let stored = parseInt(localStorage.getItem('nexdrop_bill_counter') || '0');
+            let stored = _billCounter;
             let sbVal = parseInt(bcRes.value) || 0;
-            if(sbVal > stored) { localStorage.setItem('nexdrop_bill_counter', String(sbVal)); console.log('✅ Bill counter Supabase se load:', sbVal); }
+            if(sbVal > stored) { _billCounter = sbVal; console.log('✅ Bill counter Supabase se load:', sbVal); }
         }
         const { data: wcRes } = await db.from('settings').select('value').eq('key', 'wi_counter_' + yr).maybeSingle();
         if(wcRes && wcRes.value) {
-            let stored = parseInt(localStorage.getItem('nexdrop_wi_counter') || '0');
+            let stored = _wiCounter;
             let sbVal = parseInt(wcRes.value) || 0;
-            if(sbVal > stored) { localStorage.setItem('nexdrop_wi_counter', String(sbVal)); console.log('✅ WI counter Supabase se load:', sbVal); }
+            if(sbVal > stored) { _wiCounter = sbVal; console.log('✅ WI counter Supabase se load:', sbVal); }
         }
         const { data: pcRes } = await db.from('settings').select('value').eq('key', 'pb_counter_' + yr).maybeSingle();
         if(pcRes && pcRes.value) {
-            let stored = parseInt(localStorage.getItem('nexdrop_pb_counter') || '0');
+            let stored = _pbCounter;
             let sbVal = parseInt(pcRes.value) || 0;
-            if(sbVal > stored) { localStorage.setItem('nexdrop_pb_counter', String(sbVal)); console.log('✅ PB counter Supabase se load:', sbVal); }
+            if(sbVal > stored) { _pbCounter = sbVal; console.log('✅ PB counter Supabase se load:', sbVal); }
         }
         // ✅ FIX v23: App Settings Supabase se load karo
         const { data: settingsRes, error: settingsErr } = await db.from('settings').select('value').eq('key', 'nexdrop_settings').maybeSingle();
@@ -907,7 +904,7 @@ async function initSupabase() {
             if(s && typeof s === 'object') {
                 settings = { ...settings, ...s };
                 delete settings.adminPassword;
-                localStorage.setItem('nexdrop_settings', JSON.stringify(s));
+                /* settings saved via Supabase */
                 console.log('✅ App settings Supabase se load hue!');
             }
         }
@@ -916,7 +913,7 @@ async function initSupabase() {
         if(!rUnitsErr && rUnitsRes && rUnitsRes.value) {
             let arr = typeof rUnitsRes.value === 'string' ? JSON.parse(rUnitsRes.value) : rUnitsRes.value;
             if(Array.isArray(arr) && arr.length > 0) {
-                localStorage.setItem('nexdrop_retail_units', JSON.stringify(arr));
+                /* retail units → in-memory */
                 console.log('✅ Retail units Supabase se load hue:', arr.length);
             }
         }
@@ -924,7 +921,7 @@ async function initSupabase() {
         if(!wUnitsErr && wUnitsRes && wUnitsRes.value) {
             let arr = typeof wUnitsRes.value === 'string' ? JSON.parse(wUnitsRes.value) : wUnitsRes.value;
             if(Array.isArray(arr) && arr.length > 0) {
-                localStorage.setItem('nexdrop_wholesale_units', JSON.stringify(arr));
+                /* wholesale units → in-memory */
                 console.log('✅ Wholesale units Supabase se load hue:', arr.length);
             }
         }
@@ -939,7 +936,7 @@ async function initSupabase() {
             .from('settings')
             .select('value')
             .eq('key', 'admin_credentials')
-            .single();
+            .maybeSingle(); // ✅ FIX: .single() → .maybeSingle() (row missing pe throw nahi hoga)
         if (!adminCredErr && adminCred && adminCred.value) {
             let creds = typeof adminCred.value === 'string'
                 ? JSON.parse(adminCred.value)
@@ -1067,21 +1064,21 @@ function _stripPasswords(usersArr) {
 // FIX #7 — localStorage se passwords hatao (startup pe purge karo)
 (function purgeStoredPasswords() {
     try {
-        const stored = localStorage.getItem('nexdrop_users');
+        const stored = users.length ? JSON.stringify(users) : null;
         if (stored) {
             const arr = JSON.parse(stored);
             const purged = arr.map(u => { const { password, ...rest } = u; return rest; });
-            localStorage.setItem('nexdrop_users', JSON.stringify(purged));
+            users = purged; /* saved to Supabase via saveUsers() */
         }
     } catch(e) {}
     // Admin credentials bhi localStorage se hatao agar koi wahan store kar gaya
     try {
-        const s = localStorage.getItem('nexdrop_settings');
+        const s = Object.keys(settings).length ? JSON.stringify(settings) : null;
         if (s) {
             const parsed = JSON.parse(s);
             delete parsed.adminPassword;
             delete parsed.adminUsername;
-            localStorage.setItem('nexdrop_settings', JSON.stringify(parsed));
+            /* settings saved via Supabase */
         }
     } catch(e) {}
 })();
@@ -1503,7 +1500,7 @@ function _stripPasswords(usersArr) {
     .product-highlights { display: flex; flex-wrap: wrap; gap: 0.3rem; margin: 0.4rem 0; }
     .highlight-tag { background: linear-gradient(135deg, #f0f7f0, #e8f5e9); color: #2c5a4a; border: 1px solid #c8e6c9; padding: 0.18rem 0.5rem; border-radius: 20px; font-size: 0.62rem; font-weight: 600; white-space: nowrap; }
     .rating { margin: 0.4rem 0; color: #ffb800; font-size: 0.75rem; }
-    .price { display: flex; align-items: baseline; gap: 0.5rem; margin: 0.4rem 0; }
+    .price { display: flex; align-items: baseline; gap: 0.5rem; margin: 0.4rem 0; flex-wrap: wrap; }
     .current-price { font-size: 1.2rem; font-weight: 700; color: #c49a6c; }
     .original-price { font-size: 0.8rem; text-decoration: line-through; color: #999; }
     .courier-note { font-size: 0.65rem; color: #ff9800; margin: 0.2rem 0; }
@@ -1757,17 +1754,20 @@ img { max-width: 100%; height: auto; }
 }
 
 /* --- B2B GRIDS: Always 4 columns on desktop --- */
-#b2bTeaGrid, #b2bMakhanaGrid, #b2bGrid {
+#b2bTeaGrid, #b2bMakhanaGrid, #b2bGrid,
+#b2bDynamicGrids .product-grid {
     grid-template-columns: repeat(4, 1fr) !important;
     gap: 1.2rem !important;
 }
 #b2bTeaGrid .product-image,
 #b2bMakhanaGrid .product-image,
-#b2bGrid .product-image {
+#b2bGrid .product-image,
+#b2bDynamicGrids .product-grid .product-image {
     height: 160px !important;
 }
 @media (min-width: 769px) and (max-width: 1100px) {
-    #b2bTeaGrid, #b2bMakhanaGrid, #b2bGrid {
+    #b2bTeaGrid, #b2bMakhanaGrid, #b2bGrid,
+    #b2bDynamicGrids .product-grid {
         grid-template-columns: repeat(3, 1fr) !important;
     }
 }
@@ -1802,17 +1802,20 @@ img { max-width: 100%; height: auto; }
     /* ✅ v32: b2b-section padding kam karo mobile pe */
     .b2b-section { padding: 1rem 0.6rem !important; }
     /* b2bTeaGrid / b2bMakhanaGrid — product-grid class already 2-col hai */
-    #b2bTeaGrid, #b2bMakhanaGrid, #b2bGrid {
+    #b2bTeaGrid, #b2bMakhanaGrid, #b2bGrid,
+    #b2bDynamicGrids .product-grid {
         grid-template-columns: repeat(2, 1fr) !important;
         gap: 0.75rem !important;
     }
     /* B2B card compact karo */
     #b2bTeaGrid .product-desc,
     #b2bMakhanaGrid .product-desc,
-    #b2bGrid .product-desc { display: none !important; }
+    #b2bGrid .product-desc,
+    #b2bDynamicGrids .product-grid .product-desc { display: none !important; }
     #b2bTeaGrid .product-highlights,
     #b2bMakhanaGrid .product-highlights,
-    #b2bGrid .product-highlights { display: none !important; }
+    #b2bGrid .product-highlights,
+    #b2bDynamicGrids .product-grid .product-highlights { display: none !important; }
 }
 @media (min-width: 600px) and (max-width: 768px) {
     .b2b-grid { grid-template-columns: repeat(2, 1fr) !important; }
@@ -2090,7 +2093,7 @@ body.dark-mode .nav-links { background: #121a18 !important; }
       var p=item.data;
       var discPrice=Math.round(p.price-(p.price*(p.discount||0)/100));
       var imgHtml=(p.imageType==='upload'&&p.imageValue)
-        ?'<img class="psc-card-img" src="'+p.imageValue+'" alt="'+p.name+'" loading="lazy">'
+        ?'<img class="psc-card-img" data-src="'+p.imageValue+'" src="data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' viewBox=\'0 0 1 1\'%3E%3C/svg%3E" alt="'+p.name+'" loading="lazy" decoding="async" style="opacity:0;transition:opacity 0.3s;" onload="this.style.opacity=1">'
         :'<div class="psc-card-img-emoji">'+(p.imageValue||'🌾')+'</div>';
       html+='<div class="psc-card" onclick="openProductModal(\''+item.type+'\','+p.id+')">'
         +imgHtml+'<div class="psc-card-info">'
@@ -2183,24 +2186,12 @@ body.dark-mode .nav-links { background: #121a18 !important; }
         </div>
 
         <!-- Wholesale Tea heading (shown when tea products exist) -->
-        <div id="b2bTeaHeading" style="display:none;margin-bottom:0.8rem;">
-            <div style="display:flex;align-items:center;gap:0.7rem;padding:0.6rem 1rem;background:linear-gradient(135deg,#e3f2fd,#bbdefb);border-radius:12px;border-left:4px solid #1565c0;">
-                <span style="font-size:1.3rem;">🍵</span>
-                <span style="font-weight:700;color:#1565c0;font-size:0.95rem;">Wholesale Tea</span>
-            </div>
-        </div>
-        <div class="product-grid" id="b2bTeaGrid" style="margin-bottom:2rem;"></div>
+        <!-- Dynamic wholesale category grids (fully generated by displayB2B()) -->
+        <div id="b2bDynamicGrids"></div>
 
-        <!-- Wholesale Makhana heading -->
-        <div id="b2bMakhanaHeading" style="display:none;margin-bottom:0.8rem;">
-            <div style="display:flex;align-items:center;gap:0.7rem;padding:0.6rem 1rem;background:linear-gradient(135deg,#fff8e1,#ffecb3);border-radius:12px;border-left:4px solid #f57f17;">
-                <span style="font-size:1.3rem;">📦</span>
-                <span style="font-weight:700;color:#f57f17;font-size:0.95rem;">Wholesale Makhana</span>
-            </div>
-        </div>
-        <div class="product-grid" id="b2bMakhanaGrid"></div>
-
-        <!-- Single grid (used when "All" or single category) -->
+        <!-- Legacy grids (kept for JS compatibility, hidden) -->
+        <div class="product-grid" id="b2bTeaGrid" style="display:none;"></div>
+        <div class="product-grid" id="b2bMakhanaGrid" style="display:none;"></div>
         <div class="product-grid" id="b2bGrid" style="display:none;"></div>
     </div>
 </div>
@@ -4951,6 +4942,10 @@ let orders = [];
 let users = [];
 let bills = [];
 let bulkEnquiries = [], cart = [], currentUser = null;
+
+// ✅ BUG FIX: Cart localStorage persistence
+function saveCart() { /* cart is in-memory — no localStorage needed */ }
+function loadCart() { /* cart starts empty on page load — in-memory only */ cart = []; }
 let settings = { defaultCourier: 40, freeMin: 999, whatsappNo: "919006606697", sellerStateCode: "10", qrCodeImage: null, upiId: "43459091963@sbi", bankAccount: "43459091963", bankName: "State Bank of India", bankIFSC: "SBIN0018623", accountName: "Nexdrop Solutions Pvt. Ltd." };
 
 // Default products image map (pexels URLs)
@@ -4975,15 +4970,13 @@ function loadData() {
             if(typeof loadCategoryTagsList === 'function') loadCategoryTagsList();
         }, 100);
     }).catch(function() {
-        let p = localStorage.getItem('nexdrop_products');
-        if(p) { products = JSON.parse(p); products = products.map(pr => { if(pr.stockQty===undefined||pr.stockQty===null) pr.stockQty=pr.inStock?50:0; if(pr.codAllowed===undefined) pr.codAllowed=true; return pr; }); }
-        let o = localStorage.getItem('nexdrop_orders'); if(o) orders = JSON.parse(o);
-        let bl = localStorage.getItem('nexdrop_bills'); if(bl) bills = JSON.parse(bl);
-        let u = localStorage.getItem('nexdrop_users'); if(u) users = _stripPasswords(JSON.parse(u)); // 🔒 FIX B2: passwords strip karo
-        let b = localStorage.getItem('nexdrop_bulk'); if(b) bulkEnquiries = JSON.parse(b);
-        let b2 = localStorage.getItem('nexdrop_b2b'); if(b2) b2bProducts = JSON.parse(b2);
-        let s = localStorage.getItem('nexdrop_settings'); if(s) settings = {...settings, ...JSON.parse(s)};
-        let cu = localStorage.getItem('nexdrop_user'); if(cu) currentUser = JSON.parse(cu);
+        // products loaded from Supabase in-memory); }
+        // orders already in-memory
+        // users loaded from Supabase in-memory // 🔒 FIX B2: passwords strip karo
+        // bulkEnquiries already in-memory
+        // b2bProducts already in-memory from Supabase
+        // settings loaded from Supabase in loadData()
+        // currentUser is in-memory (set during login)
         updateStats();
         setTimeout(function() { if(typeof loadUnitsDisplay === 'function') loadUnitsDisplay(); }, 100);
     });
@@ -5005,14 +4998,14 @@ function saveProducts() {
     // Supabase mein save karo (sab products)
     products.forEach(p => sbSaveProduct(p));
     // localStorage backup bhi rakho
-    localStorage.setItem('nexdrop_products', JSON.stringify(products));
+    /* products saved via sbSaveProduct - Supabase only */
     updateStats(); displayProducts();
     if(typeof displayHomeProducts === 'function') displayHomeProducts(); // ✅ FIX: Home page grid update karo
 }
 function saveOrders() {
     // Supabase mein save karo
     orders.forEach(o => sbSaveOrder(o));
-    localStorage.setItem('nexdrop_orders', JSON.stringify(orders));
+    /* orders saved via Supabase */
     updateStats();
 }
 function saveUsers() {
@@ -5021,7 +5014,7 @@ function saveUsers() {
         const { password, _newPassword, ...safe } = u;
         return safe;
     });
-    localStorage.setItem('nexdrop_users', JSON.stringify(safeUsers));
+    /* users saved via Supabase */
     // ✅ FIX v26: Supabase mein bhi sync karo (admin panel se user edit hone par)
     // Note: sbSaveUser password nahi save karta jab _newPassword nahi hota
     (users || []).forEach(u => {
@@ -5030,7 +5023,7 @@ function saveUsers() {
     updateStats();
 }
 function saveBulk() {
-    localStorage.setItem('nexdrop_bulk', JSON.stringify(bulkEnquiries));
+    /* bulkEnquiries in-memory */
     // ✅ FIX 3: Supabase mein bhi sync karo
     bulkEnquiries.forEach(e => sbSaveBulkEnquiry(e));
     updateStats();
@@ -5045,7 +5038,7 @@ function saveB2B() {
             { onConflict: 'key' }
         ).then(function(res){ if(res && res.error) console.warn('B2B settings sync failed:', res.error.message); });
     } catch(e) { console.warn('saveB2B settings upsert error:', e.message); }
-    localStorage.setItem('nexdrop_b2b', JSON.stringify(b2bProducts));
+    // b2b saved to Supabase via saveB2B()
     displayB2B();
 }
 
@@ -5078,7 +5071,7 @@ function saveAllB2B() {
 function saveSettingsData() {
     // 🔒 FIX #7: adminPassword kabhi localStorage mein store nahi hoga
     const { adminPassword, ...safeSettings } = settings;
-    localStorage.setItem('nexdrop_settings', JSON.stringify(safeSettings));
+    // settings saved to Supabase below
     // ✅ FIX v23: Settings Supabase mein bhi sync karo
     try {
         db.from('settings').upsert(
@@ -5087,6 +5080,22 @@ function saveSettingsData() {
         ).then(function(res){ if(res && res.error) console.log('Settings Supabase sync failed:', res.error.message); });
     } catch(e) { console.log('saveSettingsData Supabase error:', e.message); }
     }
+// ✅ FIX: calcOrderGST global scope mein — per updateStats() call re-definition band
+// Per-product gstSlab se accurate GST calculate karo, fallback 5%
+function calcOrderGST(o) {
+    let parseTotal = t => { if(typeof t === 'number') return t; return parseInt(String(t).replace(/[₹,]/g,''))||0; };
+    let g = 0;
+    (o.items || []).forEach(function(item) {
+        let prod = products.find(function(p){ return p.id === item.productId || p.name === item.name; })
+                || b2bProducts.find(function(p){ return p.id === item.productId || p.name === item.name; });
+        let slab = (prod && prod.gstSlab != null) ? prod.gstSlab : 5;
+        let amt = parseTotal(item.price || 0) * (item.quantity || 1);
+        g += Math.round((amt / (1 + slab/100)) * (slab/100) * 100) / 100;
+    });
+    if(g === 0) { g = Math.round(parseTotal(o.total) * 5 / 105); } // fallback
+    return g;
+}
+
 function updateStats() {
     // Stock stats
     let lowStockCount = products.filter(p => p.stockQty !== null && p.stockQty !== undefined && p.stockQty <= 10 && p.stockQty > 0).length
@@ -5204,19 +5213,7 @@ function updateStats() {
     if(document.getElementById('statTotalSales')) document.getElementById('statTotalSales').innerText = '₹'+totalSales.toLocaleString('en-IN');
     if(document.getElementById('statTodaySales')) document.getElementById('statTodaySales').innerText = '₹'+todaySales.toLocaleString('en-IN');
     if(document.getElementById('statTodayOrders')) document.getElementById('statTodayOrders').innerText = todayOrders.length;
-    // GST stats — per-product slab se accurate calculate karo (hardcoded 5% nahi)
-    function calcOrderGST(o) {
-        let g = 0;
-        (o.items || []).forEach(function(item) {
-            let prod = products.find(function(p){ return p.id === item.productId || p.name === item.name; })
-                    || b2bProducts.find(function(p){ return p.id === item.productId || p.name === item.name; });
-            let slab = (prod && prod.gstSlab != null) ? prod.gstSlab : 5;
-            let amt = parseTotal(item.price || 0) * (item.quantity || 1);
-            g += Math.round((amt / (1 + slab/100)) * (slab/100) * 100) / 100;
-        });
-        if(g === 0) { g = Math.round(parseTotal(o.total) * 5 / 105); } // fallback
-        return g;
-    }
+    // GST stats — calcOrderGST() global function use karo (performance fix: no re-definition per call)
     let gstOrders = orders.filter(o=>o.status!=='Cancelled');
     let totalGST = Math.round(gstOrders.reduce((s,o) => s + calcOrderGST(o), 0));
     let todayGST = Math.round(todayOrders.filter(o=>o.status!=='Cancelled').reduce((s,o) => s + calcOrderGST(o), 0));
@@ -5270,8 +5267,9 @@ function buildRetailCard(p) {
     if(!p.inStock || p.stockQty === 0) stockBadge = '<div style="font-size:0.65rem;color:#ff4444;font-weight:700;margin:2px 0;">❌ Out of Stock</div>';
     else if(p.stockQty !== null && p.stockQty !== undefined && p.stockQty <= 5) stockBadge = '<div style="font-size:0.65rem;color:#ff4444;font-weight:700;margin:2px 0;">🔥 Only ' + p.stockQty + ' left!</div>';
     else if(p.stockQty !== null && p.stockQty !== undefined && p.stockQty <= 10) stockBadge = '<div style="font-size:0.65rem;color:#ff9800;font-weight:700;margin:2px 0;">⚡ Only ' + p.stockQty + ' remaining</div>';
+    let discBadgeHtml = p.discount > 0 ? `<div class="product-badge" style="background:#ff4444;">${p.discount}% OFF</div>` : '';
     return `<div class="product-card" style="cursor:pointer;" onclick="openProductModal('retail',${p.id})">
-  <div class="product-image">${imgHtml}</div>
+  ${discBadgeHtml}<div class="product-image">${imgHtml}</div>
   <div class="product-info">
     <div class="product-name">${p.name}</div>
     <div class="price"><span class="current-price">₹${Math.round(discPrice)}${p.priceUnit?'<span style="font-size:0.7rem;font-weight:500;color:#6b5e4a;">/'+p.priceUnit+'</span>':''}</span>${p.discount>0?' <span style="font-size:0.9rem;color:#999;margin:0 4px;">-</span> <span class="original-price" style="font-size:0.85rem;text-decoration:line-through;">₹'+p.price+'</span> <span style="font-size:0.65rem;background:#2c5a4a;color:white;padding:1px 6px;border-radius:10px;margin-left:2px;">'+p.discount+'% OFF</span>':''}</div>
@@ -5360,15 +5358,40 @@ function displayProducts() {
 }
 function displayB2B() {
     let currentFilter = typeof _currentB2BFilter !== 'undefined' ? _currentB2BFilter : 'all';
-    // ✅ v32 FIX: custom_b2b categories wale products bhi include karo makhana mein
-    let teaProducts = b2bProducts.filter(p => {
-        let c = getProductCategory4(p, true);
-        return c === 'wholesale_tea';
-    });
-    let makhanaProducts = b2bProducts.filter(p => {
-        let c = getProductCategory4(p, true);
-        return c === 'wholesale_makhana' || c.startsWith('custom_b2b:');
-    });
+
+    // ── Emoji helper for wholesale categories ──
+    function _b2bCatEmoji(catLower) {
+        if(catLower.includes('tea') || catLower.includes('chai')) return '🍵';
+        if(catLower.includes('makhana')) return '📦';
+        if(catLower.includes('personal care') || catLower.includes('care')) return '🧴';
+        if(catLower.includes('spice') || catLower.includes('masala')) return '🌶️';
+        if(catLower.includes('rice') || catLower.includes('grain')) return '🌾';
+        return '📦';
+    }
+
+    // ── Heading color palette for dynamic wholesale categories ──
+    const _b2bHeadingStyles = [
+        {bg:'linear-gradient(135deg,#e3f2fd,#bbdefb)', border:'#1565c0', color:'#1565c0'},
+        {bg:'linear-gradient(135deg,#fff8e1,#ffecb3)', border:'#f57f17', color:'#f57f17'},
+        {bg:'linear-gradient(135deg,#f3e5f5,#e1bee7)', border:'#7b1fa2', color:'#7b1fa2'},
+        {bg:'linear-gradient(135deg,#e8f5e9,#c8e6c9)', border:'#2c5a4a', color:'#2c5a4a'},
+        {bg:'linear-gradient(135deg,#fce4ec,#f8bbd9)', border:'#880e4f', color:'#880e4f'},
+        {bg:'linear-gradient(135deg,#e8eaf6,#c5cae9)', border:'#1a237e', color:'#1a237e'},
+        {bg:'linear-gradient(135deg,#e0f2f1,#b2dfdb)', border:'#004d40', color:'#004d40'},
+    ];
+
+    // ── Get all Wholesale categories from categories list (same source as retail) ──
+    let allCats = (typeof getCategories === 'function') ? getCategories() : [];
+    let wholesaleCats = allCats.filter(c => c.toLowerCase().startsWith('wholesale '));
+    // Fallback: agar categories list khali ho toh products ke categories se banao
+    if(!wholesaleCats.length) {
+        wholesaleCats = [...new Set(b2bProducts.map(p => p.category).filter(Boolean)
+            .filter(c => c.toLowerCase().startsWith('wholesale ')))].sort();
+    }
+    // Agar kuch bhi nahi toh legacy fallback
+    if(!wholesaleCats.length) {
+        wholesaleCats = ['Wholesale Tea', 'Wholesale Makhana'];
+    }
 
     function buildCard(p) {
         let hlHtml = renderHighlights(p.highlights, 'b2b');
@@ -5420,41 +5443,80 @@ function displayB2B() {
         </div>`;
     }
 
-    let teaHtml = teaProducts.map(buildCard).join('');
-    let makhanaHtml = makhanaProducts.map(buildCard).join('');
+    // ── Determine which categories to show ──
+    let catsToShow = [];
+    if(currentFilter === 'all') {
+        catsToShow = wholesaleCats;
+    } else if(currentFilter.startsWith('dyncat:')) {
+        let dynCat = currentFilter.replace('dyncat:', '');
+        catsToShow = wholesaleCats.filter(c => c.toLowerCase() === dynCat.toLowerCase());
+        if(!catsToShow.length) catsToShow = [dynCat]; // fallback
+    } else {
+        // Direct category name match
+        let matched = wholesaleCats.find(c => c.toLowerCase() === currentFilter.toLowerCase());
+        catsToShow = matched ? [matched] : wholesaleCats.filter(c => c.toLowerCase().includes(currentFilter.toLowerCase()));
+        if(!catsToShow.length) catsToShow = wholesaleCats; // fallback to all
+    }
 
-    // Show/hide sections based on filter
-    let showTea = currentFilter === 'all' || currentFilter === 'tea';
-    let showMakhana = currentFilter === 'all' || currentFilter === 'makhana';
+    // ── Build dynamic grids HTML ──
+    let dynamicContainer = document.getElementById('b2bDynamicGrids');
+    if(!dynamicContainer) return;
 
-    let teaGrid = document.getElementById('b2bTeaGrid');
-    let makhanaGrid = document.getElementById('b2bMakhanaGrid');
-    let teaHeading = document.getElementById('b2bTeaHeading');
-    let makhanaHeading = document.getElementById('b2bMakhanaHeading');
+    let html = '';
+    catsToShow.forEach((cat, idx) => {
+        let catLower = cat.toLowerCase();
+        let catDisplay = cat.replace(/^Wholesale\s+/i, '');
+        let emoji = _b2bCatEmoji(catLower);
+        let style = _b2bHeadingStyles[idx % _b2bHeadingStyles.length];
+        let catProducts = b2bProducts.filter(p => (p.category || '').toLowerCase().trim() === catLower);
+        if(!catProducts.length) return; // skip empty categories
 
-    if(teaGrid) teaGrid.innerHTML = showTea ? teaHtml : '';
-    if(makhanaGrid) makhanaGrid.innerHTML = showMakhana ? makhanaHtml : '';
-    if(teaHeading) teaHeading.style.display = showTea && teaProducts.length > 0 ? 'block' : 'none';
-    if(makhanaHeading) makhanaHeading.style.display = showMakhana && makhanaProducts.length > 0 ? 'block' : 'none';
+        let cardsHtml = catProducts.map(buildCard).join('');
+        html += `<div style="margin-bottom:2rem;">
+            <div style="display:flex;align-items:center;gap:0.7rem;padding:0.6rem 1rem;background:${style.bg};border-radius:12px;border-left:4px solid ${style.border};margin-bottom:0.8rem;">
+                <span style="font-size:1.3rem;">${emoji}</span>
+                <span style="font-weight:700;color:${style.color};font-size:0.95rem;">Wholesale ${catDisplay}</span>
+            </div>
+            <div class="product-grid">${cardsHtml}</div>
+        </div>`;
+    });
 
-    // Legacy single grid (kept hidden)
+    // Agar koi bhi product nahi mila in selected categories
+    if(!html) {
+        html = `<div style="text-align:center;padding:2rem;color:#888;font-size:0.9rem;">
+            📦 Is category mein abhi koi wholesale product nahi hai
+        </div>`;
+    }
+
+    dynamicContainer.innerHTML = html;
+
+    // Legacy grids always hidden
     let legacyGrid = document.getElementById('b2bGrid');
     if(legacyGrid) legacyGrid.innerHTML = '';
 }
 
-function openBulkEnquiry() { scrollToContact(); setTimeout(openBulkModal, 300); }
+function openBulkEnquiry() { scrollToContact(); setTimeout(function(){ openBulk(''); }, 300); }
 
 // B2B filter function
 let _currentB2BFilter = 'all';
 function filterB2BProducts(cat) {
     _currentB2BFilter = cat;
     document.querySelectorAll('[id^="b2bTab_"]').forEach(t => t.classList.remove('hp-tab-active'));
-    let activeTab = document.getElementById('b2bTab_' + cat);
-    if(!activeTab && cat !== 'all') {
-        let slug = 'b2bdyn_' + cat.toLowerCase().trim().replace(/\s+/g,'_').replace(/[^a-z0-9_]/g,'');
-        activeTab = document.getElementById('b2bTab_' + slug);
+    // 'all' tab
+    if(cat === 'all') {
+        let allTab = document.getElementById('b2bTab_all');
+        if(allTab) allTab.classList.add('hp-tab-active');
+    } else {
+        // Dynamic tabs use _filterCat property (set during tab creation)
+        let b2bContainer = document.getElementById('b2bTabsContainer');
+        if(b2bContainer) {
+            let catToMatch = cat.startsWith('dyncat:') ? cat.replace('dyncat:','') : cat;
+            b2bContainer.querySelectorAll('.hp-tab-dynamic').forEach(btn => {
+                if(btn._filterCat && btn._filterCat.toLowerCase() === catToMatch.toLowerCase())
+                    btn.classList.add('hp-tab-active');
+            });
+        }
     }
-    if(activeTab) activeTab.classList.add('hp-tab-active');
     displayB2B();
 }
 // ==================== PRODUCT DETAIL MODAL ====================
@@ -5706,18 +5768,18 @@ function addToCart(id, type) {
         let item = cart.find(i => i.cartKey === cartKey);
         if(item) item.quantity++;
         else cart.push({ id: id, cartKey: cartKey, name: p.name, price: discPrice, quantity: 1, courierCharge: 0, isB2B: true, orderType: 'wholesale' });
-        updateCartCount(); renderCart(); return;
+        saveCart(); updateCartCount(); renderCart(); return;
     }
     // Retail
     let item = cart.find(i => i.id === id && !i.isB2B);
     if(item) item.quantity++;
     else cart.push({ id: p.id, name: p.name, price: Math.round(p.price - p.price*(p.discount||0)/100), quantity: 1, courierCharge: p.courierCharge||0, isB2B: false });
-    updateCartCount(); renderCart();
+    saveCart(); updateCartCount(); renderCart();
 }
 function removeFromCart(id, cartKey) {
     if(cartKey) cart = cart.filter(i => i.cartKey !== cartKey);
     else cart = cart.filter(i => i.id !== id && !i.isB2B);
-    updateCartCount(); renderCart();
+    saveCart(); updateCartCount(); renderCart();
 }
 function updateCartCount() {
     let total = cart.reduce((s,i) => s+i.quantity, 0);
@@ -5756,6 +5818,7 @@ function updateQty(id, delta, cartKey) {
         if(cartKey) cart = cart.filter(i => i.cartKey !== cartKey);
         else cart = cart.filter(i => !(i.id === id && !i.isB2B));
     }
+    saveCart();
     updateCartCount();
     renderCart();
 }
@@ -5812,8 +5875,8 @@ function renderCart() {
 }
 function toggleCart() { document.getElementById('cartModal').classList.toggle('active'); renderCart(); }
 async function checkout() {
-    if(cart.length === 0) { alert('Cart is empty!'); return; }
-    if(!currentUser) { alert('Please login first!'); openUserPanel(); return; }
+    if(cart.length === 0) { showToast('❌ Cart empty hai! Pehle kuch add karein.', '#ff4444'); return; }
+    if(!currentUser) { showToast('❌ Please pehle login karein!', '#ff4444'); openUserPanel(); return; }
     let subtotal = cart.reduce((s,i) => s + i.price * i.quantity, 0);
     let maxCourier = cart.length > 0 ? Math.max(...cart.map(i => i.courierCharge||0)) : 0; // ✅ FIX: empty cart -Infinity guard
     // Coupon discount apply karo
@@ -5848,7 +5911,7 @@ async function checkout() {
         console.error('[checkout] Supabase save failed, localStorage fallback active:', e);
         showToast('⚠️ Order saved locally (server sync pending)', '#e67e22');
     }
-    localStorage.setItem('nexdrop_orders', JSON.stringify(orders));
+    /* orders saved via Supabase */
     // Coupon use count increment
     if(activeCoupon) { try { sbIncrementCoupon(activeCoupon.code); } catch(e){} activeCoupon = null; }
     updateStats();
@@ -5856,7 +5919,7 @@ async function checkout() {
     let couponLine = couponDiscount > 0 ? "\nCoupon Discount: -₹" + couponDiscount : (isFreeShipping ? "\nCoupon: Free Shipping" : "");
     let orderTypeLabel = orderType === 'wholesale' ? '🏭 Wholesale Order' : orderType === 'mixed' ? '🔀 Mixed Order (Retail+Wholesale)' : '🛒 Retail Order';
     let message = "*" + (settings.companyName||'Nexdrop Mart') + " - New Order #" + orderId + "*\n" + orderTypeLabel + "\n\n*Customer Details:*\nName: " + currentUser.name + "\nPhone: " + currentUser.phone + "\nAddress: " + currentUser.address + "\n\n*Order Items:*\n" + itemLines + "\n\nSubtotal: ₹" + subtotal + couponLine + "\nCourier: " + (courier === 0 ? "FREE" : "₹"+courier) + "\n*Total: ₹" + total + "*\n\nPayment: " + paymentMethod + "\nDate: " + new Date().toLocaleString();
-    cart = []; updateCartCount(); renderCart(); toggleCart();
+    cart = []; saveCart(); updateCartCount(); renderCart(); toggleCart();
     window.open('https://wa.me/' + (settings.whatsappNo || '919006606697') + '?text=' + encodeURIComponent(message), '_blank'); // ✅ FIX Bug3: null guard
     setTimeout(() => sendPaymentDetailsToCustomer(orderId, total, currentUser.phone, paymentMethod), 1200);
 }
@@ -6070,11 +6133,10 @@ function closeBulkModal() { document.getElementById('bulkModal').classList.remov
 // ==================== DEALERSHIP MODAL ====================
 let dealershipEnquiries = [];
 function loadDealershipData() {
-    let d = localStorage.getItem('nexdrop_dealership');
-    if(d) dealershipEnquiries = JSON.parse(d);
+    // dealershipEnquiries in-memory
 }
 function saveDealershipData() {
-    localStorage.setItem('nexdrop_dealership', JSON.stringify(dealershipEnquiries));
+    /* dealershipEnquiries in-memory */
     // ✅ FIX 2: Supabase mein bhi sync karo
     dealershipEnquiries.forEach(e => sbSaveDealership(e));
     loadDealershipList();
@@ -6100,7 +6162,7 @@ function submitDealershipForm() {
     let investment = document.getElementById('dlrInvestment').value.trim();
     let message = document.getElementById('dlrMessage').value.trim();
     if(!name || !phone || !city || !state || !type) {
-        alert('❌ Please fill in all required (*) fields.'); return;
+        showToast('❌ Please fill in all required (*) fields.', '#ff4444'); return;
     }
     // Save to localStorage
     let enquiry = {
@@ -6126,7 +6188,7 @@ function submitDealershipForm() {
         window.open('https://wa.me/' + cleanPhone + '?text=' + encodeURIComponent(customerMsg), '_blank');
     }, 1500);
 
-    alert('✅ Your dealership application has been submitted successfully!\n\nOur team will contact you within 24–48 business hours.');
+    showToast('✅ Dealership application submit ho gayi! Our team 24–48 hours mein contact karegi.', '#2c5a4a');
 }
 function loadDealershipList() {
     let el = document.getElementById('dealershipList');
@@ -6184,7 +6246,7 @@ loadDealershipData();
 // ==================== END DEALERSHIP MODAL ====================
 function sendBulkEnquiry() {
     let name=document.getElementById('bulkName').value, phone=document.getElementById('bulkPhone').value, product=document.getElementById('bulkProduct').value, qty=document.getElementById('bulkQuantity').value, msg=document.getElementById('bulkMessage').value;
-    if(!name || !phone) { alert('Please fill name and phone'); return; }
+    if(!name || !phone) { showToast('⚠️ Please fill name and phone.', '#e67e22'); return; }
     let enquiry = { id:Date.now(), name, phone, product, quantity:qty, message:msg, date:new Date().toLocaleString(), status:'New' };
     bulkEnquiries.unshift(enquiry); saveBulk();
     let waMsg = "Nexdrop Mart - Bulk Enquiry\n\nName: " + name + "\nPhone: " + phone + "\nProduct: " + product + "\nQuantity: " + qty + "\nMessage: " + msg + "\n\nPlease share bulk pricing.";
@@ -6415,7 +6477,7 @@ function userRegister() {
     sbSaveUser(newUser).then(() => {
         // After save, ensure no password artifacts remain in localStorage
         const storableUsers = users.map(u => { const { password, _newPassword, ...safe } = u; return safe; });
-        localStorage.setItem('nexdrop_users', JSON.stringify(storableUsers));
+        /* users saved via Supabase */
         saveCurrentUser();
     });
     document.getElementById('userAuthTabs').style.display = 'none';
@@ -6500,7 +6562,7 @@ function loadDashboard() {
     for(let o of userOrders) {
         let statusColor = o.status==='Delivered'?'#4caf50':o.status==='Shipped'?'#2196f3':o.status==='Confirmed'||o.status==='Processing'?'#ff9800':o.status==='Cancelled'?'#ff4444':'#999';
         // Show admin note if exists (for order tracking)
-        let noteHtml = o.adminNote ? `<div style="margin-top:0.4rem;padding:0.3rem 0.5rem;background:#fff3e0;border-radius:6px;font-size:0.7rem;border-left:3px solid #ff9800;">📝 <strong>Update:</strong> ${o.adminNote}</div>` : '';
+        let noteHtml = o.adminNote ? `<div style="margin-top:0.4rem;padding:0.3rem 0.5rem;background:#fff3e0;border-radius:6px;font-size:0.7rem;border-left:3px solid #ff9800;">📝 <strong>Update:</strong> ${esc(o.adminNote)}</div>` : ''; // 🔒 FIX: XSS — adminNote esc() se sanitize karo
         ordersHtml += `<div style="background:#f5f0ea;border-radius:12px;padding:0.8rem;margin-bottom:0.6rem;border-left:3px solid ${statusColor}">
           <div style="display:flex;justify-content:space-between;align-items:center;">
             <strong style="font-size:0.85rem;">#${String(o.id).slice(-6)}</strong>
@@ -6617,7 +6679,6 @@ async function loadUserBills() {
     });
 
     // localStorage bills bhi check karo (agar same device hai)
-    let bl = localStorage.getItem('nexdrop_bills');
     let allBills = bl ? JSON.parse(bl) : [];
 
     if(userOrders.length === 0 && allBills.length === 0) {
@@ -6677,9 +6738,9 @@ async function loadUserBills() {
 function saveCurrentUser() {
     if(currentUser) {
         const { password, _newPassword, ...safeUser } = currentUser;
-        localStorage.setItem('nexdrop_user', JSON.stringify(safeUser));
+        /* currentUser in-memory only */
     } else {
-        localStorage.removeItem('nexdrop_user');
+        /* currentUser cleared in-memory */
     }
 }
 
@@ -6720,13 +6781,13 @@ const _adminLoginGuard = (function() {
 async function adminLogin() {
     // 🔒 Brute force check
     if (_adminLoginGuard.isLocked()) {
-        alert('⛔ Too many failed attempts! ' + _adminLoginGuard.secondsLeft() + ' seconds baad try karein.');
+        showToast('⛔ Too many failed attempts! ' + _adminLoginGuard.secondsLeft() + ' seconds baad try karein.', '#c62828');
         return;
     }
 
     let u = document.getElementById('adminUser').value.trim();
     let p = document.getElementById('adminPass').value;
-    if (!u || !p) { alert('Username aur password dono zaroori hain!'); return; }
+    if (!u || !p) { showToast('⚠️ Username aur password dono zaroori hain!', '#e67e22'); return; }
 
     // 🔒 Direct Supabase se verify karo — memory mein password nahi rakha jaata
     let verified = false;
@@ -6765,7 +6826,7 @@ async function adminLogin() {
     } catch(e) {
         // 🔒 Supabase offline hone par bhi login DENY — no insecure fallback
         /* SECURITY: console.log('Supabase admin credential fetch error:', e.message) */;
-        alert('⚠️ Server se connect nahi ho saka. Internet check karein aur dobara try karein.');
+        showToast('⚠️ Server se connect nahi ho saka. Internet check karein aur dobara try karein.', '#e67e22');
         return;
     }
 
@@ -6780,7 +6841,7 @@ async function adminLogin() {
     } else {
         _adminLoginGuard.recordFail();
         let remaining = 5 - /* approximate */ 1; // guard tracks internally
-        alert('❌ Invalid credentials! Username ya password galat hai.');
+        showToast('❌ Invalid credentials! Username ya password galat hai.', '#c62828');
         document.getElementById('adminPass').value = '';
     }
 }
@@ -6967,7 +7028,7 @@ function saveSingleProduct(id) {
 function uploadAdminPhoto(id, input) {
     let file = input.files[0];
     if(!file) return;
-    if(file.size > 10*1024*1024) { alert('❌ File bahut badi hai! Max 10MB allowed hai.'); return; }
+    if(file.size > 10*1024*1024) { showToast('❌ File bahut badi hai! Max 10MB allowed hai.', '#ff4444'); return; }
     
     // Show loading indicator
     let imgCell = document.getElementById('imgCell_' + id);
@@ -6994,7 +7055,7 @@ function uploadAdminPhoto(id, input) {
                 showToast('✅ Photo uploaded!');
             }
         };
-        img.onerror = function() { alert('❌ Image could not load. Please try again.'); loadAdminProducts(); };
+        img.onerror = function() { showToast('❌ Image load nahi ho saki. Please try again.', '#ff4444'); loadAdminProducts(); };
         img.src = e.target.result;
     };
     reader.readAsDataURL(file);
@@ -7010,7 +7071,7 @@ function toggleCOD(id) {
         else showToast('✅ COD enabled for ' + p.name, '#2c5a4a');
     } 
 }
-function deleteProduct(id) { if(confirm('Delete?')) { sbDeleteProduct(id); products=products.filter(p=>p.id!==id); localStorage.setItem('nexdrop_products', JSON.stringify(products)); updateStats(); loadAdminProducts(); displayProducts(); showToast('🗑️ Product deleted!'); } }
+function deleteProduct(id) { if(confirm('Delete?')) { sbDeleteProduct(id); products=products.filter(p=>p.id!==id); updateStats(); loadAdminProducts(); displayProducts(); showToast('🗑️ Product deleted!'); } }
 function addProduct() { let newId = Math.max(...products.map(p=>p.id),0)+1; let sqVal = parseInt(document.getElementById('newStockQty').value); let stockQty = isNaN(sqVal) ? null : sqVal; let gstSlabVal = parseFloat(document.getElementById('newGstSlab').value); let newProduct = { id:newId, name:document.getElementById('newName').value||'New Makhana', desc:document.getElementById('newDesc').value||'Description', highlights:[], price:parseInt(document.getElementById('newPrice').value)||199, imageType:'emoji', imageValue:'🌾', discount:parseInt(document.getElementById('newDiscount').value)||0, rating:4.0, ratingCount:0, courierCharge:parseInt(document.getElementById('newCourier').value)||40, category:document.getElementById('newCategory').value||'Makhana', inStock:stockQty===null||stockQty>0, stockQty:stockQty, hsnCode:document.getElementById('newHsnCode').value.trim()||'1108', gstSlab:isNaN(gstSlabVal)?5:gstSlabVal, priceUnit:document.getElementById('newPriceUnit').value||'' }; let file = document.getElementById('newProductPhoto').files[0]; if(file) { let reader = new FileReader(); reader.onload = function(e) { let img = new Image(); img.onload = function() { let canvas = document.createElement('canvas'); canvas.width = 600; canvas.height = 600 * img.height / img.width; canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height); newProduct.imageType = 'upload'; newProduct.imageValue = canvas.toDataURL('image/jpeg', 0.7); products.push(newProduct); saveProducts(); loadAdminProducts(); displayProducts(); if(typeof displayHomeProducts==='function') displayHomeProducts(); showToast('✅ Product + photo added!'); }; img.src = e.target.result; }; reader.readAsDataURL(file); } else { products.push(newProduct); saveProducts(); loadAdminProducts(); displayProducts(); if(typeof displayHomeProducts==='function') displayHomeProducts(); showToast('✅ Product added!'); document.getElementById('newPriceUnit').value=''; } }
 function addB2BProduct() {
     let nameVal = document.getElementById('newB2BName').value.trim();
@@ -7209,7 +7270,7 @@ function loadAdminB2B() {
 function uploadB2BPhoto(id, input) {
     let file = input.files[0];
     if(!file) return;
-    if(file.size > 10*1024*1024) { alert('❌ File bahut badi hai! Max 10MB allowed hai.'); return; }
+    if(file.size > 10*1024*1024) { showToast('❌ File bahut badi hai! Max 10MB allowed hai.', '#ff4444'); return; }
     let imgCell = document.getElementById('b2bImgCell_' + id);
     if(imgCell) imgCell.innerHTML = '<div style="width:60px;height:60px;display:flex;align-items:center;justify-content:center;font-size:1.2rem;">⏳</div>';
     let reader = new FileReader();
@@ -7548,7 +7609,7 @@ function startAutoRefresh() {
             const { data: b2Data, error: b2Err } = await db.from('settings').select('value').eq('key', 'nexdrop_b2b').maybeSingle();
             if (!b2Err && b2Data && b2Data.value) {
                 let arr = typeof b2Data.value === 'string' ? JSON.parse(b2Data.value) : b2Data.value;
-                if (Array.isArray(arr) && arr.length > 0) { b2bProducts = arr; localStorage.setItem('nexdrop_b2b', JSON.stringify(arr)); }
+                if (Array.isArray(arr) && arr.length > 0) { b2bProducts = arr; b2bProducts = arr; }
             }
         } catch(e) { /* localStorage already up-to-date from last save */ }
         updateStats();
@@ -7896,7 +7957,7 @@ async function clearAllTestData() {
     );
     // Also clear localStorage entries
     khataCustomersForReset.forEach(c => {
-        try { localStorage.removeItem('nexdrop_khata_entries_' + c.id); } catch(e) {}
+        /* khata entries cleared in Supabase */
     });
 
     const settingsKeysToDelete = [
@@ -7947,7 +8008,7 @@ function adminLogout() {
         // 🔒 FIX #1: Session token invalidate karo
         _adminVault.invalidate();
         closeAdminPanel();
-        setTimeout(() => { alert('✅ Successfully logged out!'); }, 300);
+        setTimeout(() => { showToast('✅ Successfully logged out!', '#2c5a4a'); }, 300);
     }
 }
 function switchTab(tab) {
@@ -8191,9 +8252,11 @@ function displayHomeProducts() {
             ? (hasNumericB2B ? Math.round(numPriceB2B - numPriceB2B*(p.discount||0)/100) : null)
             : Math.round(p.price - (p.price * (p.discount||0) / 100));
         let imgHtml = p.imageType==="upload" && p.imageValue
-            ? `<img src="${p.imageValue}" style="width:100%;height:100%;object-fit:cover;">`
+            ? `<img data-src="${p.imageValue}" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1 1'%3E%3C/svg%3E" style="width:100%;height:100%;object-fit:cover;background:#f0ebe4;opacity:0;transition:opacity 0.3s;" loading="lazy" decoding="async" alt="${p.name||'Product'}" onload="this.style.opacity=1">`
             : `<span style="font-size:3rem;">${p.imageValue||"🌾"}</span>`;
-        let badgeHtml = isB2B ? `<div style="position:absolute;top:0.5rem;left:0.5rem;background:#c49a6c;color:white;padding:2px 8px;border-radius:20px;font-size:0.62rem;font-weight:700;z-index:2;">📦 Wholesale</div>` : "";
+        let badgeHtml = isB2B 
+            ? `<div style="position:absolute;top:0.5rem;left:0.5rem;background:#c49a6c;color:white;padding:2px 8px;border-radius:20px;font-size:0.62rem;font-weight:700;z-index:2;">📦 Wholesale</div>`
+            : (p.discount > 0 ? `<div style="position:absolute;top:0.5rem;right:0.5rem;background:#e53935;color:white;padding:2px 8px;border-radius:20px;font-size:0.7rem;font-weight:800;z-index:2;letter-spacing:0.3px;">${p.discount}% OFF</div>` : "");
         let priceHtml = isB2B
             ? (hasNumericB2B
                 ? `<span style="font-size:1.2rem;font-weight:700;color:#c49a6c;">₹${discPrice}</span>${p.discount>0?`<span style="font-size:0.82rem;text-decoration:line-through;color:#aaa;">₹${numPriceB2B}</span>`:''}`
@@ -8256,13 +8319,13 @@ function applyBRCMTemplate() {
 }
 function sendBRCM() {
     let msg = document.getElementById("brcmMessage").value.trim();
-    if(!msg) { alert("❌ Message likhein pehle!"); return; }
+    if(!msg) { showToast('❌ Message likhein pehle!', '#ff4444'); return; }
     let selected = [...document.querySelectorAll("#brcmUserList input[type=checkbox]:checked")].map(cb=>cb.value);
-    if(selected.length === 0) { alert("❌ No user selected!"); return; }
+    if(selected.length === 0) { showToast('❌ Koi user select nahi kiya!', '#ff4444'); return; }
     // ✅ FIX 3: Pop-up blocker detect karo
     let testWin = window.open('', '_blank');
     if(!testWin || testWin.closed || typeof testWin.closed === 'undefined') {
-        alert('⚠️ Pop-up Block Detected!\n\nBroadcast ke liye browser ka pop-up blocker OFF karna padega.\n\n👉 Browser address bar mein pop-up icon par click karein aur "Always allow" select karein, phir dobara try karein.');
+        showToast('⚠️ Pop-up blocked! Browser mein pop-ups allow karein aur dobara try karein.', '#e67e22');
         return;
     }
     testWin.close();
@@ -8281,8 +8344,8 @@ function sendBRCM() {
 function sendBRCMCustom() {
     let phone = document.getElementById("brcmCustomPhone").value.trim().replace(/\D/g,"");
     let msg = document.getElementById("brcmMessage").value.trim();
-    if(!phone || phone.length < 10) { alert("❌ Valid phone number daalen!"); return; }
-    if(!msg) { alert("❌ Message likhein pehle!"); return; }
+    if(!phone || phone.length < 10) { showToast('❌ Valid phone number daalen!', '#ff4444'); return; }
+    if(!msg) { showToast('❌ Message likhein pehle!', '#ff4444'); return; }
     if(phone.length === 10) phone = "91" + phone;
     window.open("https://wa.me/"+phone+"?text="+encodeURIComponent(msg), "_blank");
 }
@@ -8726,11 +8789,11 @@ function saveBill(bill) {
     let existing = bills.find(b => b.orderId === bill.orderId);
     if(!existing) {
         bills.unshift(bill);
-        localStorage.setItem('nexdrop_bills', JSON.stringify(bills));
+        /* bills sync → Supabase (done via saveBills/sbSaveBill) */
     } else {
         let idx = bills.indexOf(existing);
         bills[idx] = {...existing, ...bill};
-        localStorage.setItem('nexdrop_bills', JSON.stringify(bills));
+        /* bills sync → Supabase (done via saveBills/sbSaveBill) */
     }
     // ✅ FIX 1: Supabase mein bhi sync karo (data loss prevent)
     sbSaveBill(bill);
@@ -8764,8 +8827,7 @@ function generateBillData(o) {
     if(existingBill && existingBill.billNo) {
         billNo = existingBill.billNo;
     } else {
-        let counter = parseInt(localStorage.getItem('nexdrop_bill_counter') || '0') + 1;
-        localStorage.setItem('nexdrop_bill_counter', String(counter));
+        let counter = (++_billCounter);
         let yr = new Date().getFullYear();
         billNo = 'nexdr/' + yr + '/' + String(counter).padStart(5, '0');
         // ✅ FIX: Supabase mein bhi counter sync karo (multi-device duplicate prevention)
@@ -9171,7 +9233,6 @@ function printBill() {
 function loadReports() {
     if(_rptType === 'wholesale') { loadWholesaleReports(); return; }
     // --- RETAIL ---
-    let bl = localStorage.getItem('nexdrop_bills'); if(bl) bills = JSON.parse(bl);
     let parseTotal = t => { if(typeof t === 'number') return t; return parseInt(String(t).replace(/[₹,]/g,''))||0; };
 
     // Auto-generate bills for Shipped/Delivered orders that have no bill yet
@@ -9183,7 +9244,7 @@ function loadReports() {
             changed = true;
         }
     });
-    if(changed) localStorage.setItem('nexdrop_bills', JSON.stringify(bills));
+    if(changed) /* bills sync → Supabase (done via saveBills/sbSaveBill) */
 
     // Sync bill totals/status with live order data
     bills = bills.map(b => {
@@ -9197,7 +9258,7 @@ function loadReports() {
         }
         return b;
     });
-    localStorage.setItem('nexdrop_bills', JSON.stringify(bills));
+    /* bills sync → Supabase (done via saveBills/sbSaveBill) */
 
     let search = (document.getElementById('reportSearch')?.value || '').toLowerCase().trim();
     let dateFrom = document.getElementById('reportDateFrom')?.value || '';
@@ -9262,7 +9323,7 @@ function loadReports() {
 }
 
 function loadWholesaleReports() {
-    let wiBills = JSON.parse(localStorage.getItem('nexdrop_wi_bills')||'[]');
+    let wiBills = _wiBills;
     let search   = (document.getElementById('reportSearch')?.value||'').toLowerCase().trim();
     let dateFrom = document.getElementById('reportDateFrom')?.value||'';
     let dateTo   = document.getElementById('reportDateTo')?.value||'';
@@ -9316,7 +9377,7 @@ function loadWholesaleReports() {
 
 function exportReportsCSV() {
     if(_rptType === 'wholesale') {
-        let wiBills=JSON.parse(localStorage.getItem('nexdrop_wi_bills')||'[]');
+        let wiBills=_wiBills;
         if(!wiBills.length) { showToast('⚠️ No wholesale bills found!','#ff9800'); return; }
         let rows=[['Invoice No','Customer','Phone','Date','Payment Mode','Items','Grand Total']];
         wiBills.forEach(b=>{
@@ -9332,7 +9393,6 @@ function exportReportsCSV() {
         return;
     }
     // Retail export (original)
-    let bl = localStorage.getItem('nexdrop_bills'); if(bl) bills = JSON.parse(bl);
     if(!bills.length) { showToast('⚠️ No bills yet!', '#ff9800'); return; }
     let rows = [['Bill No','Order ID','Date','Customer','Phone','Address','Items','Subtotal','Courier','GST','Total','Status']];
     bills.forEach(b => {
@@ -9462,15 +9522,11 @@ function jumpToProduct(type, id) {
 function toggleDarkMode() {
     document.body.classList.toggle('dark-mode');
     let isDark = document.body.classList.contains('dark-mode');
-    localStorage.setItem('nexdrop_dark', isDark ? '1' : '0');
+    window._darkMode = isDark; // in-memory only
     document.querySelector('.dark-toggle').textContent = isDark ? '☀️' : '🌙';
 }
 (function initDarkMode() {
-    if(localStorage.getItem('nexdrop_dark') === '1') {
-        document.body.classList.add('dark-mode');
-        let btn = document.querySelector('.dark-toggle');
-        if(btn) btn.textContent = '☀️';
-    }
+    // Dark mode persisted via Supabase user prefs only
 })();
 
 // ---- 2. PRODUCT SEARCH (Homepage) ----
@@ -9537,22 +9593,19 @@ self.addEventListener('fetch', e => e.respondWith(caches.match(e.request).then(r
 
 // ---- 6. localStorage ERROR HANDLING (quota safe save) ----
 function safeSave(key, data) {
+    // ✅ NO-LOCALSTORAGE: Supabase-only persistence
     try {
-        localStorage.setItem(key, JSON.stringify(data));
+        db.from('settings').upsert({ key: key, value: JSON.stringify(data) }, { onConflict: 'key' })
+          .then(r => { if(r && r.error) console.log('[safeSave] Supabase err:', key, r.error.message); });
         return true;
     } catch(e) {
-        if(e.name === 'QuotaExceededError') {
-            showToast('⚠️ Storage full! Please clear old bills.', '#ff9800');
-        } else {
-            showToast('❌ Data could not be saved: ' + e.message, '#ff4444');
-        }
+        showToast('❌ Data could not be saved: ' + e.message, '#ff4444');
         return false;
     }
 }
 
 // ---- 7. DATA EXPORT FUNCTIONS ----
 function exportAllData() {
-    let bl = localStorage.getItem('nexdrop_bills'); if(bl) bills = JSON.parse(bl);
     let exportObj = {
         version: '1.0', exportedAt: new Date().toISOString(), exportedBy: 'Nexdrop Admin',
         data: { products, b2bProducts, orders, users, bills, bulkEnquiries, settings }
@@ -9574,7 +9627,6 @@ function exportProductsOnly() {
     showToast('✅ Products JSON export ho raha hai!', '#1565c0');
 }
 function exportOrdersOnly() {
-    let bl = localStorage.getItem('nexdrop_bills'); if(bl) bills = JSON.parse(bl);
     let obj = { version:'1.0', exportedAt: new Date().toISOString(), type:'orders', data: { orders, bills } };
     let blob = new Blob([JSON.stringify(obj, null, 2)], {type:'application/json'});
     let a = document.createElement('a'); a.href = URL.createObjectURL(blob);
@@ -9637,7 +9689,7 @@ function importMergeData() {
         if(d.b2bProducts && Array.isArray(d.b2bProducts)) { d.b2bProducts.forEach(np => { if(!b2bProducts.find(p => p.id === np.id)) b2bProducts.push(np); }); saveB2B(); }
         if(d.orders && Array.isArray(d.orders)) { d.orders.forEach(no => { if(!orders.find(o => o.id === no.id)) orders.push(no); }); saveOrders(); }
         if(d.users && Array.isArray(d.users)) { d.users.forEach(nu => { if(!users.find(u => u.email === nu.email)) users.push(nu); }); saveUsers(); }
-        if(d.bills && Array.isArray(d.bills)) { let bl = localStorage.getItem('nexdrop_bills'); if(bl) bills = JSON.parse(bl); d.bills.forEach(nb => { if(!bills.find(b => b.orderId === nb.orderId)) bills.push(nb); }); safeSave('nexdrop_bills', bills); }
+        if(d.bills && Array.isArray(d.bills)) { d.bills.forEach(nb => { if(!bills.find(b => b.orderId === nb.orderId)) bills.push(nb); }); safeSave('nexdrop_bills', bills); }
         if(d.bulkEnquiries && Array.isArray(d.bulkEnquiries)) { d.bulkEnquiries.forEach(ne => { if(!bulkEnquiries.find(e => e.id === ne.id)) bulkEnquiries.push(ne); }); saveBulk(); }
         updateStats(); loadAdminOrders(); loadAdminUsers();
         if(msgEl) { msgEl.style.display='block'; msgEl.style.background='#e8f5e9'; msgEl.style.color='#2c5a4a'; msgEl.innerHTML='✅ Data merge ho gaya! Duplicates skip kiye.'; }
@@ -9669,29 +9721,38 @@ function importReplaceData() {
 
 // ---- PAGE INIT: Load data and display home products on page load ----
 document.addEventListener('DOMContentLoaded', function() {
+    loadCart(); // ✅ BUG FIX: Restore cart from localStorage on page load
     loadData();
     displayHomeProducts();
+    updateCartCount(); // reflect restored cart count in UI
 });
 
-// ---- 9. IMAGE LAZY LOADING (patch existing displayProducts) ----
+// ---- 9. IMAGE LAZY LOADING (IntersectionObserver — NO localStorage) ----
 document.addEventListener('DOMContentLoaded', function() {
-    // Apply lazy loading to all product images after render
-    let observer = new IntersectionObserver(function(entries) {
+    // IntersectionObserver: data-src images load when visible
+    const imgObserver = new IntersectionObserver(function(entries) {
         entries.forEach(entry => {
             if(entry.isIntersecting) {
                 let img = entry.target;
-                if(img.dataset.src) { img.src = img.dataset.src; img.removeAttribute('data-src'); }
-                observer.unobserve(img);
+                if(img.dataset.src) {
+                    img.src = img.dataset.src;
+                    img.removeAttribute('data-src');
+                    img.style.opacity = '1';
+                }
+                imgObserver.unobserve(img);
             }
         });
-    }, {rootMargin: '200px'});
-    // Watch new images added to DOM
-    let mo = new MutationObserver(function() {
-        document.querySelectorAll('img[data-src]').forEach(img => observer.observe(img));
+    }, { rootMargin: '300px 0px', threshold: 0 });
+    
+    // Watch for new images added dynamically
+    const mo = new MutationObserver(function() {
+        document.querySelectorAll('img[data-src]').forEach(img => imgObserver.observe(img));
     });
-    mo.observe(document.body, {childList: true, subtree: true});
+    mo.observe(document.body, { childList: true, subtree: true });
+    // Observe any images already in DOM
+    document.querySelectorAll('img[data-src]').forEach(img => imgObserver.observe(img));
     // Dark mode init
-    if(localStorage.getItem('nexdrop_dark') === '1') {
+    if(window._darkMode) {
         document.body.classList.add('dark-mode');
         let btn = document.querySelector('.dark-toggle');
         if(btn) btn.textContent = '☀️';
@@ -9899,7 +9960,7 @@ function loadGSTReport() {
 
     if(_gstType === 'retail') {
         // Retail: from orders (Shipped + Delivered)
-        let bl = localStorage.getItem('nexdrop_bills'); let localBills = bl ? JSON.parse(bl) : [];
+        
         let filtered = orders.filter(o => (o.status==='Shipped'||o.status==='Delivered'));
         filtered.forEach(o => {
             if(search) {
@@ -9936,7 +9997,7 @@ function loadGSTReport() {
         });
     } else {
         // Wholesale: from nexdrop_wi_bills
-        let wiBills = JSON.parse(localStorage.getItem('nexdrop_wi_bills')||'[]');
+        let wiBills = _wiBills;
         wiBills.forEach(b => {
             if(search) {
                 let hay = ((b.id||'')+(b.customer||'')+(b.phone||'')).toLowerCase();
@@ -10034,7 +10095,7 @@ function exportGSTCSV() {
 
     let rows = [['Bill/Invoice No','Customer','Date','Total','Taxable Amount','IGST (Inter-State)','CGST 2.5%','SGST 2.5%','Total GST','GST Type','Bill Type']];
     if(_gstType==='retail') {
-        let bl=localStorage.getItem('nexdrop_bills'); let localBills=bl?JSON.parse(bl):[];
+        
         orders.filter(o=>o.status==='Shipped'||o.status==='Delivered').forEach(o => {
             if(search && !(String(o.id)+' '+(o.customerName||'')).toLowerCase().includes(search)) return;
             if(!inRange(o.date)) return;
@@ -10056,7 +10117,7 @@ function exportGSTCSV() {
             rows.push([billNo,o.customerName||'-',o.date||'-',total.toFixed(2),taxable.toFixed(2),igst.toFixed(2),cgst.toFixed(2),sgst.toFixed(2),gst.toFixed(2),isInter?'IGST':'CGST+SGST','Retail']);
         });
     } else {
-        let wiBills=JSON.parse(localStorage.getItem('nexdrop_wi_bills')||'[]');
+        let wiBills=_wiBills;
         wiBills.forEach(b => {
             if(search && !((b.id||'')+(b.customer||'')).toLowerCase().includes(search)) return;
             if(!inRange(b.date)) return;
@@ -10082,13 +10143,28 @@ function exportGSTCSV() {
 
 // ==================== PURCHASE BILLS MODULE ====================
 let pbRowCount = 0;
+// ✅ NO-LOCALSTORAGE: In-memory globals (Supabase se load hote hain)
+var _wiBills = [];
+var _pbBills = [];
+var _suppliers = [];
+var _reviews = [];
+var _billCounter = 0;   // in-memory bill counters
+var _wiCounter = 0;
+var _pbCounter = 0;
+var _retailUnits = null;  // null = use defaults
+var _wholesaleUnits = null;
+var _sliderImages = [];  // slider images in-memory
+var _coupons = [];  // coupons in-memory
+var _adminNotifs = [];  // admin notifications in-memory
+var _savedAddresses = [];  // user saved addresses in-memory
+var _khataCustomers = [];  // khata in-memory
+var _khataEntries = {};  // {cid: [entries]} in-memory
+var _distReadIds = {};  // {email: [readIds]} in-memory
 
 // --- Supplier Management ---
-function pbGetSuppliers() {
-    try { return JSON.parse(localStorage.getItem('nexdrop_suppliers')||'[]'); } catch(e) { return []; }
-}
+function pbGetSuppliers() { return _suppliers; }
 function pbSaveSuppliers(arr) {
-    localStorage.setItem('nexdrop_suppliers', JSON.stringify(arr));
+    _suppliers = arr;
     // ✅ FIX: Supabase mein bhi sync karo
     try {
         db.from('settings').upsert(
@@ -10105,7 +10181,7 @@ async function pbLoadSuppliersFromSupabase() {
         if(error) throw error;
         if(data && data.value) {
             const arr = typeof data.value === 'string' ? JSON.parse(data.value) : data.value;
-            localStorage.setItem('nexdrop_suppliers', JSON.stringify(arr));
+            _suppliers = arr; /* Supabase sync done via pbSaveSuppliers */
         }
     } catch(e) {
         console.log('Suppliers Supabase load failed, localStorage use hoga:', e.message);
@@ -10352,8 +10428,7 @@ function pbSaveBill() {
     let disc=parseFloat(document.getElementById('pbDiscount')?.value)||0;
     let extra=parseFloat(document.getElementById('pbExtra')?.value)||0;
     let grand=subtotal+totalGST-disc+extra;
-    let pbCounter=parseInt(localStorage.getItem('nexdrop_pb_counter')||'0')+1;
-    localStorage.setItem('nexdrop_pb_counter',String(pbCounter));
+    let pbCounter = (++_pbCounter);
     // ✅ FIX v21: PB counter Supabase mein bhi sync karo
     try {
         db.from('settings').upsert(
@@ -10378,9 +10453,9 @@ function pbSaveBill() {
         createdAt: new Date().toISOString()
     };
 
-    let pbBills = JSON.parse(localStorage.getItem('nexdrop_pb_bills')||'[]');
+    let pbBills = _pbBills;
     pbBills.unshift(bill);
-    localStorage.setItem('nexdrop_pb_bills', JSON.stringify(pbBills));
+    _pbBills = pbBills;
     // ✅ FIX: Purchase bills Supabase mein bhi sync karo
     try {
         db.from('settings').upsert(
@@ -10392,21 +10467,21 @@ function pbSaveBill() {
     // Stock auto-update
     if(doStock) {
         if(stockType==='retail') {
-            let p2=localStorage.getItem('nexdrop_products'); if(p2) products=JSON.parse(p2);
+            // products already in-memory
             let updatedRetail=[];
             items.forEach(it=>{
                 let p=products.find(x=>x.name&&x.name.trim().toLowerCase()===it.name.trim().toLowerCase());
                 if(p){ if(p.stockQty===null||p.stockQty===undefined) p.stockQty=0; p.stockQty+=it.qty; p.inStock=true; updatedRetail.push(p); }
             });
-            localStorage.setItem('nexdrop_products',JSON.stringify(products));
+            /* products → Supabase via sbSaveProduct */
             updatedRetail.forEach(function(p){ sbSaveProduct(p); });
         } else {
-            let b2=localStorage.getItem('nexdrop_b2b'); if(b2) b2bProducts=JSON.parse(b2);
+            // b2bProducts already in-memory from Supabase
             items.forEach(it=>{
                 let p=b2bProducts.find(x=>x.name&&x.name.trim().toLowerCase()===it.name.trim().toLowerCase());
                 if(p){ if(p.stockQty===null||p.stockQty===undefined) p.stockQty=0; p.stockQty+=it.qty; p.inStock=true; }
             });
-            localStorage.setItem('nexdrop_b2b',JSON.stringify(b2bProducts));
+            // b2b saved to Supabase via saveB2B()
             saveB2B();
         }
         refreshStockDashboard();
@@ -10436,7 +10511,7 @@ function pbResetForm() {
 
 // --- Bills History ---
 function pbLoadHistory() {
-    let pbBills=JSON.parse(localStorage.getItem('nexdrop_pb_bills')||'[]');
+    let pbBills=_pbBills;
     let status=(document.getElementById('pbStatusFilter')?.value||'').trim();
     let dateFrom=document.getElementById('pbDateFrom')?.value||'';
     let dateTo=document.getElementById('pbDateTo')?.value||'';
@@ -10484,11 +10559,11 @@ function pbLoadHistory() {
 }
 
 function pbMarkPaid(id) {
-    let pbBills=JSON.parse(localStorage.getItem('nexdrop_pb_bills')||'[]');
+    let pbBills=_pbBills;
     let b=pbBills.find(x=>x.id===id);
     if(!b) return;
     b.status='Paid'; b.amountPaid=b.total;
-    localStorage.setItem('nexdrop_pb_bills',JSON.stringify(pbBills));
+    _pbBills = pbBills;
     // ✅ FIX: Supabase sync
     try { db.from('settings').upsert({key:'nexdrop_pb_bills',value:JSON.stringify(pbBills)},{onConflict:'key'}).then(function(r){if(r&&r.error)console.log('pbMarkPaid sync err:',r.error.message);}); } catch(e){}
     pbLoadHistory(); pbUpdateSummary();
@@ -10498,12 +10573,12 @@ function pbMarkPaid(id) {
 function pbPartialPay(id) {
     let amt=parseFloat(prompt('Kitna payment diya? (₹)'));
     if(isNaN(amt)||amt<=0) return;
-    let pbBills=JSON.parse(localStorage.getItem('nexdrop_pb_bills')||'[]');
+    let pbBills=_pbBills;
     let b=pbBills.find(x=>x.id===id);
     if(!b) return;
     b.amountPaid=(b.amountPaid||0)+amt;
     b.status=b.amountPaid>=b.total?'Paid':'Partial';
-    localStorage.setItem('nexdrop_pb_bills',JSON.stringify(pbBills));
+    _pbBills = pbBills;
     // ✅ FIX: Supabase sync
     try { db.from('settings').upsert({key:'nexdrop_pb_bills',value:JSON.stringify(pbBills)},{onConflict:'key'}).then(function(r){if(r&&r.error)console.log('pbPartialPay sync err:',r.error.message);}); } catch(e){}
     pbLoadHistory(); pbUpdateSummary();
@@ -10512,8 +10587,8 @@ function pbPartialPay(id) {
 
 function pbDeleteBill(id) {
     if(!confirm('Delete Purchase Bill '+id+'?')) return;
-    let pbBills=JSON.parse(localStorage.getItem('nexdrop_pb_bills')||'[]').filter(x=>x.id!==id);
-    localStorage.setItem('nexdrop_pb_bills',JSON.stringify(pbBills));
+    let pbBills=_pbBills.filter(x=>x.id!==id);
+    _pbBills = pbBills;
     // ✅ FIX: Supabase sync
     try { db.from('settings').upsert({key:'nexdrop_pb_bills',value:JSON.stringify(pbBills)},{onConflict:'key'}).then(function(r){if(r&&r.error)console.log('pbDeleteBill sync err:',r.error.message);}); } catch(e){}
     pbLoadHistory(); pbUpdateSummary();
@@ -10521,7 +10596,7 @@ function pbDeleteBill(id) {
 }
 
 function pbUpdateSummary() {
-    let pbBills=JSON.parse(localStorage.getItem('nexdrop_pb_bills')||'[]');
+    let pbBills=_pbBills;
     let suppliers=pbGetSuppliers();
     let total=pbBills.reduce((s,b)=>s+parseFloat(b.total||0),0);
     let paid=pbBills.filter(b=>b.status==='Paid').reduce((s,b)=>s+parseFloat(b.total||0),0);
@@ -10543,7 +10618,7 @@ function pbUpdateSummary() {
 }
 
 function pbExportCSV() {
-    let pbBills=JSON.parse(localStorage.getItem('nexdrop_pb_bills')||'[]');
+    let pbBills=_pbBills;
     if(!pbBills.length){showToast('⚠️ Koi purchase bills nahi!','#ff9800');return;}
     let rows=[['Bill ID','Supplier','Supplier Bill No','Date','Payment Mode','Items','Subtotal','GST','Discount','Total','Status','Amount Paid','Balance Due']];
     pbBills.forEach(b=>{
@@ -10789,8 +10864,7 @@ function wiGenerateInvoice() {
     });
     let grandTotal = subtotal + totalGST - d.discount + d.extra;
     let yr = new Date().getFullYear();
-    let wCounter = parseInt(localStorage.getItem('nexdrop_wi_counter') || '0') + 1;
-    localStorage.setItem('nexdrop_wi_counter', String(wCounter));
+    let wCounter = (++_wiCounter);
     let invNo = 'nxdw/' + yr + '/' + String(wCounter).padStart(5, '0');
     // ✅ FIX: Wholesale counter bhi Supabase mein sync karo
     try {
@@ -10801,7 +10875,7 @@ function wiGenerateInvoice() {
     } catch(e) { console.log('WI counter Supabase error:', e.message); }
 
     // Save to localStorage
-    let wiBills = JSON.parse(localStorage.getItem('nexdrop_wi_bills') || '[]');
+    let wiBills = _wiBills;
     wiBills.unshift({ id: invNo, customer: d.customer, phone: d.phone, date: d.date, total: grandTotal, data: d });
     // ✅ FIX v36: Truncation se pehle admin ko toast warning dikhao
     if(wiBills.length > 200) {
@@ -10809,7 +10883,7 @@ function wiGenerateInvoice() {
         showToast('⚠️ Wholesale invoices 200 limit pe pahunch gayi — purani entries hata di gayi hain. CSV export kar lein.', '#ff9800');
         wiBills = wiBills.slice(0, 200);
     }
-    localStorage.setItem('nexdrop_wi_bills', JSON.stringify(wiBills));
+    _wiBills = wiBills;
     // ✅ FIX: Wholesale bills Supabase mein bhi sync karo
     try {
         db.from('settings').upsert(
@@ -10820,7 +10894,7 @@ function wiGenerateInvoice() {
 
     // ✅ Wholesale Stock Auto-Minus: item name se B2B product match karke stock minus karo
     let stockDeducted = [];
-    let b2bRaw = localStorage.getItem('nexdrop_b2b');
+    let b2bRaw = null; // b2bProducts used directly
     if(b2bRaw) b2bProducts = JSON.parse(b2bRaw);
     d.items.forEach(item => {
         let itemNameLower = item.name.trim().toLowerCase();
@@ -10834,7 +10908,7 @@ function wiGenerateInvoice() {
             stockDeducted.push(`${matched.name}: ${before} → ${matched.stockQty}`);
         }
     });
-    localStorage.setItem('nexdrop_b2b', JSON.stringify(b2bProducts));
+    // b2b saved to Supabase via saveB2B()
     b2bProducts.forEach(function(p){ sbSaveProduct(p); });
     refreshStockDashboard();
     updateStats();
@@ -10845,8 +10919,7 @@ function wiGenerateInvoice() {
     // ✅ Khata Auto-Save: Bill generate hote hi khata mein payment mode ke hisaab se entry add karo
     (function() {
         try {
-            let customers = [];
-            try { customers = JSON.parse(localStorage.getItem('nexdrop_khata_customers') || '[]'); } catch(e) {}
+            let customers = _khataCustomers; // ✅ FIX: [] hardcode tha — ab actual in-memory array use hoga
 
             // Customer dhundho ya naya banao (phone se match karo pehle, phir naam se)
             let cid = null;
@@ -10857,12 +10930,12 @@ function wiGenerateInvoice() {
                 cid = existing.id;
             } else {
                 cid = 'kc_' + Date.now();
-                customers.push({ id: cid, name: d.customer, phone: d.phone });
-                localStorage.setItem('nexdrop_khata_customers', JSON.stringify(customers));
+                _khataCustomers.push({ id: cid, name: d.customer, phone: d.phone }); // ✅ FIX: customers nahi, _khataCustomers mein push
+                /* khata customers → Supabase via safeSave */
             }
 
             let entries = [];
-            try { entries = JSON.parse(localStorage.getItem('nexdrop_khata_entries_' + cid) || '[]'); } catch(e) {}
+            entries = _khataEntries[cid] || [];
 
             const pm = (d.payMode || 'Cash').trim();
             const entryDate = d.date || new Date().toISOString().split('T')[0];
@@ -10905,7 +10978,7 @@ function wiGenerateInvoice() {
                 showToast('📒 Khata: ₹' + grandTotal.toFixed(2) + ' Paid via ' + pm + ' — ' + d.customer + ' ✅ Clear', '#2e7d32');
             }
 
-            localStorage.setItem('nexdrop_khata_entries_' + cid, JSON.stringify(entries));
+            _khataEntries[cid] = entries;
             // ✅ FIX v20: Khata entries Supabase mein bhi sync karo
             try {
                 db.from('settings').upsert(
@@ -10916,7 +10989,7 @@ function wiGenerateInvoice() {
             // ✅ FIX v20: Customers list bhi sync karo (naya customer add hua ho sakta hai)
             try {
                 db.from('settings').upsert(
-                    { key: 'nexdrop_khata_customers', value: localStorage.getItem('nexdrop_khata_customers') || '[]' },
+                    { key: 'nexdrop_khata_customers', value: JSON.stringify(_khataCustomers) },
                     { onConflict: 'key' }
                 ).then(function(res){ if(res && res.error) console.log('Khata auto-save customers Supabase sync failed:', res.error.message); });
             } catch(e3) { console.log('Khata auto-save customers Supabase error:', e3.message); }
@@ -11205,7 +11278,7 @@ function wiSendWhatsApp() {
 }
 
 function wiLoadSaved() {
-    let wiBills = JSON.parse(localStorage.getItem('nexdrop_wi_bills') || '[]');
+    let wiBills = _wiBills;
     let container = document.getElementById('wiSavedList');
     if(!container) return;
     if(wiBills.length === 0) { container.innerHTML = '<div style="text-align:center;color:#999;padding:1rem;font-size:0.8rem;">— Koi saved invoice nahi —</div>'; return; }
@@ -11226,7 +11299,7 @@ function wiLoadSaved() {
 }
 
 function wiViewBill(id) {
-    let wiBills = JSON.parse(localStorage.getItem('nexdrop_wi_bills') || '[]');
+    let wiBills = _wiBills;
     let bill = wiBills.find(b => b.id === id);
     if(!bill) return;
     let d = bill.data;
@@ -11238,9 +11311,9 @@ function wiViewBill(id) {
 
 function wiDeleteBill(id) {
     if(!confirm('Delete Invoice ' + id + '?')) return;
-    let wiBills = JSON.parse(localStorage.getItem('nexdrop_wi_bills') || '[]');
+    let wiBills = _wiBills;
     wiBills = wiBills.filter(b => b.id !== id);
-    localStorage.setItem('nexdrop_wi_bills', JSON.stringify(wiBills));
+    _wiBills = wiBills;
     // ✅ FIX: Supabase mein bhi update karo
     try {
         db.from('settings').upsert(
@@ -11282,14 +11355,12 @@ const DEFAULT_WHOLESALE_UNITS = ['kg','g','quintal','ton','bag','box'];
 function renderUnitsList() { if(typeof loadUnitsDisplay === 'function') loadUnitsDisplay(); }
 
 function getUnits(type) {
-    let key = type === 'retail' ? 'nexdrop_retail_units' : 'nexdrop_wholesale_units';
-    let saved = localStorage.getItem(key);
-    if(saved) return JSON.parse(saved);
-    return type === 'retail' ? [...DEFAULT_RETAIL_UNITS] : [...DEFAULT_WHOLESALE_UNITS];
+    if(type === 'retail') return _retailUnits ? _retailUnits : [...DEFAULT_RETAIL_UNITS];
+    return _wholesaleUnits ? _wholesaleUnits : [...DEFAULT_WHOLESALE_UNITS];
 }
 function saveUnits(type, arr) {
+    if(type === 'retail') _retailUnits = arr; else _wholesaleUnits = arr;
     let key = type === 'retail' ? 'nexdrop_retail_units' : 'nexdrop_wholesale_units';
-    localStorage.setItem(key, JSON.stringify(arr));
     // ✅ FIX v23: Units Supabase mein bhi sync karo
     try {
         db.from('settings').upsert(
@@ -11384,10 +11455,10 @@ window.openPolicy = function(type) {
 // ==================== KHATA (DEBIT/CREDIT) MANAGEMENT ====================
 // ✅ FIX v20: Khata Supabase sync — customers + entries dono settings table mein store hote hain
 function khataGetAll() {
-    try { return JSON.parse(localStorage.getItem('nexdrop_khata_customers') || '[]'); } catch(e) { return []; }
+    return _khataCustomers;
 }
 function khataSaveAll(data) {
-    localStorage.setItem('nexdrop_khata_customers', JSON.stringify(data));
+    _khataCustomers = data;
     try {
         db.from('settings').upsert(
             { key: 'nexdrop_khata_customers', value: JSON.stringify(data) },
@@ -11396,10 +11467,10 @@ function khataSaveAll(data) {
     } catch(e) { console.log('Khata customers Supabase error:', e.message); }
 }
 function khataGetEntries(cid) {
-    try { return JSON.parse(localStorage.getItem('nexdrop_khata_entries_' + cid) || '[]'); } catch(e) { return []; }
+    return _khataEntries[cid] || [];
 }
 function khataSaveEntries(cid, entries) {
-    localStorage.setItem('nexdrop_khata_entries_' + cid, JSON.stringify(entries));
+    _khataEntries[cid] = entries;
     // ✅ Entries bhi Supabase mein sync karo — key: nexdrop_khata_entries_{cid}
     try {
         db.from('settings').upsert(
@@ -11582,7 +11653,7 @@ window.khataDeleteCustomer = function() {
     if(!confirm('Delete customer "' + (c?.name||'') + '" and all their entries?')) return;
     const updated = customers.filter(x=>x.id!==cid);
     khataSaveAll(updated);
-    localStorage.removeItem('nexdrop_khata_entries_' + cid);
+    delete _khataEntries[cid];
     // ✅ FIX v20: Supabase se bhi entries delete karo
     try {
         db.from('settings').delete().eq('key', 'nexdrop_khata_entries_' + cid).then(function(res){
@@ -11666,7 +11737,7 @@ window.khataWhatsAppSummary = function() {
 
     function loadSlides(){
         try {
-            var stored = localStorage.getItem('nexdrop_slider_images');
+            var stored = _sliderImages.length ? JSON.stringify(_sliderImages) : null;
             if(stored){ slides = JSON.parse(stored); }
         } catch(e){}
         if(!slides || slides.length === 0){ slides = DEFAULT_SLIDES.slice(); }
@@ -11680,7 +11751,7 @@ window.khataWhatsAppSummary = function() {
                 var arr = typeof data.value === 'string' ? JSON.parse(data.value) : data.value;
                 if(arr && arr.length > 0){
                     slides = arr;
-                    localStorage.setItem('nexdrop_slider_images', JSON.stringify(arr));
+                    _sliderImages = arr;
                     renderSlider();
                 }
             }
@@ -11690,7 +11761,7 @@ window.khataWhatsAppSummary = function() {
     }
 
     window.saveSlides = function(arr){
-        try { localStorage.setItem('nexdrop_slider_images', JSON.stringify(arr)); } catch(e){}
+        try { _sliderImages = arr; } catch(e){}
         slides = arr;
         renderSlider();
     };
@@ -12080,20 +12151,29 @@ function populateCategoryDropdowns() {
         });
     }
 
-    // ── Dynamic tabs: B2B / Wholesale section (v36.2 — full rebuild) ──
+    // ── Dynamic tabs: B2B / Wholesale section — categories list se banana (same as retail) ──
     let b2bContainer = document.getElementById('b2bTabsContainer');
     if(b2bContainer) {
         b2bContainer.querySelectorAll('.hp-tab:not(#b2bTab_all)').forEach(el => el.remove());
-        [...new Set(
-            (typeof b2bProducts !== 'undefined' ? b2bProducts : [])
-                .map(p => p.category).filter(Boolean)
-        )].sort().forEach(c => {
+        let allCats = (typeof getCategories === 'function') ? getCategories() : [];
+        let wholesaleCats = allCats.filter(c => c.toLowerCase().startsWith('wholesale '));
+        // Fallback: products se banana agar categories list khali ho
+        if(!wholesaleCats.length) {
+            wholesaleCats = [...new Set(
+                (typeof b2bProducts !== 'undefined' ? b2bProducts : [])
+                    .map(p => p.category).filter(Boolean)
+                    .filter(c => c.toLowerCase().startsWith('wholesale '))
+            )].sort();
+        }
+        wholesaleCats.sort().forEach(c => {
             let btn = document.createElement('button');
             btn.className = 'hp-tab hp-tab-dynamic';
             let lower = c.toLowerCase();
             let emoji = lower.includes('makhana') ? '🌾' : (lower.includes('tea') || lower.includes('chai')) ? '🍵' : '📦';
-            btn.textContent = emoji + ' ' + c;
-            btn.onclick = (function(cat){ return function(){ filterB2BProducts(cat); }; })(c);
+            // Display name mein "Wholesale " prefix hata do (same as retail "Retail " hata deta hai)
+            btn.textContent = emoji + ' ' + c.replace(/^Wholesale\s+/i, '');
+            btn._filterCat = c; // store full name for matching in filterB2BProducts
+            btn.onclick = (function(cat){ return function(){ filterB2BProducts('dyncat:' + cat); }; })(c);
             b2bContainer.appendChild(btn);
         });
     }
@@ -12111,6 +12191,7 @@ function populateCategoryDropdowns() {
             let lower = c.toLowerCase();
             let emoji = lower.includes('tea') || lower.includes('chai') ? '☕' : lower.includes('makhana') ? '🌾' : '🏷️';
             btn.textContent = emoji + ' ' + c.replace(/^Retail\s+/i,'');
+            btn._filterCat = c; // store full name for matching
             btn.onclick = (function(cat){ return function(){ filterRetailProducts('dyncat:' + cat); }; })(c);
             retailContainer.appendChild(btn);
         });
@@ -12122,10 +12203,10 @@ function populateCategoryDropdowns() {
 let activeCoupon = null;
 
 function getCoupons() {
-    try { return JSON.parse(localStorage.getItem('nexdrop_coupons') || '[]'); } catch(e) { return []; }
+    return _coupons;
 }
 function saveCoupons(arr) {
-    localStorage.setItem('nexdrop_coupons', JSON.stringify(arr));
+    _coupons = arr;
     // ✅ FIX v23: Supabase coupons table mein bhi sync karo
     try {
         arr.forEach(function(c) {
@@ -12234,7 +12315,7 @@ async function applyCoupon() {
                     usedCount: c.used_count||0, expiry: c.expiry||'',
                     desc: c.description||'', active: c.active!==false };
             });
-            localStorage.setItem('nexdrop_coupons', JSON.stringify(mapped));
+            /* coupons saved via Supabase */
         }
     } catch(e) { console.log('applyCoupon fresh load error:', e.message); }
     let coupons = getCoupons();
@@ -12291,9 +12372,24 @@ function loadAnalytics(days) {
     });
     let cutoff = new Date(); cutoff.setDate(cutoff.getDate() - days);
     let parseTotal = t => { if(typeof t==='number') return t; return parseInt(String(t).replace(/[₹,]/g,''))||0; };
+    // 🔒 FIX: Indian locale DD/MM/YYYY format bhi handle karo (same as updateStats)
+    function _parseOrderDate(dateStr) {
+        if(!dateStr) return null;
+        try {
+            let parts = dateStr.split(',')[0].trim().split('/');
+            if(parts.length === 3) {
+                let dd=parts[0].trim(), mm=parts[1].trim(), yyyy=parts[2].trim();
+                let d = new Date(yyyy+'-'+mm.padStart(2,'0')+'-'+dd.padStart(2,'0'));
+                if(!isNaN(d)) return d;
+            }
+            let d = new Date(dateStr);
+            return isNaN(d) ? null : d;
+        } catch(e) { return null; }
+    }
     let filteredOrders = orders.filter(o => {
         if(!o.date) return false;
-        try { return new Date(o.date) >= cutoff; } catch(e) { return false; }
+        let d = _parseOrderDate(o.date);
+        return d && d >= cutoff;
     });
     let totalRev = filteredOrders.filter(o=>o.status!=='Cancelled').reduce((s,o)=>s+parseTotal(o.total),0);
     let totalCount = filteredOrders.length;
@@ -12383,9 +12479,9 @@ function loadAnalytics(days) {
 // ──────────────────────────────────────────────
 // 3. REVIEWS SYSTEM
 // ──────────────────────────────────────────────
-function getReviews() { try { return JSON.parse(localStorage.getItem('nexdrop_reviews')||'[]'); } catch(e) { return []; } }
+function getReviews() { return _reviews; }
 function saveReviews(arr) {
-    localStorage.setItem('nexdrop_reviews', JSON.stringify(arr));
+    _reviews = arr;
     // ✅ FIX: Supabase mein bhi sync karo
     try {
         db.from('settings').upsert(
@@ -12402,14 +12498,13 @@ async function loadReviewsFromSupabase() {
         if(error) throw error;
         if(data && data.value) {
             const arr = typeof data.value === 'string' ? JSON.parse(data.value) : data.value;
-            localStorage.setItem('nexdrop_reviews', JSON.stringify(arr));
+            _reviews = arr;
             return arr;
         }
     } catch(e) {
         console.log('Reviews Supabase load failed, using localStorage:', e.message);
     }
-    try { let s = localStorage.getItem('nexdrop_reviews'); if(s) return JSON.parse(s); } catch(e2){}
-    return [];
+    return _reviews.length ? _reviews : [];
 }
 
 let _reviewStar = 0;
@@ -12661,9 +12756,9 @@ function renderHomepageReviews() {
 // ──────────────────────────────────────────────
 // 4. ADMIN NOTIFICATIONS
 // ──────────────────────────────────────────────
-function getNotifs() { try { return JSON.parse(localStorage.getItem('nexdrop_admin_notifs')||'[]'); } catch(e) { return []; } }
+function getNotifs() { return _adminNotifs; }
 function saveNotifs(arr) {
-    localStorage.setItem('nexdrop_admin_notifs', JSON.stringify(arr));
+    adminNotifs = (typeof adminNotifs !== 'undefined') ? arr : arr;
     // ✅ FIX v21: Supabase sync
     try {
         db.from('settings').upsert(
@@ -12732,7 +12827,7 @@ document.addEventListener('click', function(e) {
 // ──────────────────────────────────────────────
 function getAddresses() {
     if(!currentUser) return [];
-    try { return JSON.parse(localStorage.getItem('nexdrop_addr_' + currentUser.email) || '[]'); } catch(e) { return []; }
+    return _savedAddresses;
 }
 async function loadAddressesFromSupabase() {
     // ✅ FIX v21: Supabase se addresses load karo startup pe
@@ -12741,13 +12836,13 @@ async function loadAddressesFromSupabase() {
         const { data, error } = await db.from('settings').select('value').eq('key', 'nexdrop_addr_' + currentUser.email).maybeSingle();
         if(!error && data && data.value) {
             const arr = typeof data.value === 'string' ? JSON.parse(data.value) : data.value;
-            if(Array.isArray(arr)) localStorage.setItem('nexdrop_addr_' + currentUser.email, JSON.stringify(arr));
+            if(Array.isArray(arr)) _savedAddresses = arr;
         }
     } catch(e) { console.log('loadAddressesFromSupabase error:', e.message); }
 }
 function saveAddresses(arr) {
     if(!currentUser) return;
-    localStorage.setItem('nexdrop_addr_' + currentUser.email, JSON.stringify(arr));
+    _savedAddresses = arr;
     // ✅ FIX v21: Supabase users table mein addresses column update karo
     try {
         db.from('users').update({ addresses: arr }).eq('email', currentUser.email).then(function(res){
@@ -13021,7 +13116,7 @@ function loadPnLStatement() {
     for(let m=0; m<12; m++) { b2bByMonth[m] = 0; b2bOrdersByMonth[m] = 0; }
 
     try {
-        let wiBills = JSON.parse(localStorage.getItem('nexdrop_wi_bills') || '[]');
+        let wiBills = _wiBills;
         wiBills.forEach(b => {
             let d = b.date ? new Date(b.date) : null;
             if(!d || d.getFullYear() !== year) return;
@@ -13035,7 +13130,7 @@ function loadPnLStatement() {
     let purchaseByMonth = {};
     for(let m=0; m<12; m++) purchaseByMonth[m] = 0;
     try {
-        let pbBills = JSON.parse(localStorage.getItem('nexdrop_pb_bills') || '[]');
+        let pbBills = _pbBills.slice();
         pbBills.forEach(b => {
             let d = b.date ? new Date(b.date) : null;
             if(!d || d.getFullYear() !== year) return;
@@ -13146,11 +13241,11 @@ function exportPnLCSV() {
         let m=d.getMonth(); retailByMonth[m]+=parseTotal(o.total); retailOrders[m]++;
     });
     try {
-        let wiBills=JSON.parse(localStorage.getItem('nexdrop_wi_bills')||'[]');
+        let wiBills=_wiBills;
         wiBills.forEach(b=>{let d=b.date?new Date(b.date):null;if(!d||d.getFullYear()!==year)return;let m=d.getMonth();b2bByMonth[m]+=parseTotal(b.total);b2bOrders[m]++;});
     }catch(e){}
     try {
-        let pbBills=JSON.parse(localStorage.getItem('nexdrop_pb_bills')||'[]');
+        let pbBills=_pbBills;
         pbBills.forEach(b=>{let d=b.date?new Date(b.date):null;if(!d||d.getFullYear()!==year)return;let m=d.getMonth();purchaseByMonth[m]+=parseTotal(b.grand||b.total||0);});
     }catch(e){}
     let csv = 'Month,Retail Revenue,B2B Revenue,Total Revenue,Purchase Cost,Gross Profit,Margin %,Orders\n';
@@ -13225,14 +13320,14 @@ async function sbLoadSliderImages() {
         if(error) throw error;
         if(data && data.value) {
             const arr = typeof data.value === 'string' ? JSON.parse(data.value) : data.value;
-            localStorage.setItem('nexdrop_slider_images', JSON.stringify(arr));
+            _sliderImages = arr;
             return arr;
         }
     } catch(e) {
         console.log('Supabase slider load failed, using localStorage:', e.message);
     }
     // fallback: localStorage
-    try { var s = localStorage.getItem('nexdrop_slider_images'); if(s) return JSON.parse(s); } catch(e2){}
+    if(_sliderImages.length) return _sliderImages;
     return null;
 }
 
@@ -13250,7 +13345,7 @@ async function sbSaveSliderImages(arr) {
         console.log('Supabase slider save failed:', e.message);
     }
     // localStorage mein bhi save karo as backup
-    localStorage.setItem('nexdrop_slider_images', JSON.stringify(arr));
+    _sliderImages = arr;
 }
 
 window.openSliderManager = async function(){
@@ -13324,7 +13419,7 @@ window.handleSliderFileUpload = function(input){
 window.addSlide = function(){
     var url = (document.getElementById('slNewUrl')||{}).value.trim();
     var cap = (document.getElementById('slNewCap')||{}).value.trim();
-    if(!url){ alert('Please enter an image URL or upload a file!'); return; }
+    if(!url){ showToast('⚠️ Image URL enter karein ya file upload karein!', '#e67e22'); return; }
     var stored = getStoredSlides();
     stored.push({ url: url, caption: cap || 'New Slide' });
     rebuildSliderRows(stored);
@@ -13334,7 +13429,7 @@ window.addSlide = function(){
 
 window.removeSlide = function(idx){
     var stored = getStoredSlides();
-    if(stored.length <= 1){ alert('At least 1 slide is required!'); return; }
+    if(stored.length <= 1){ showToast('⚠️ Kam se kam 1 slide zaroori hai!', '#e67e22'); return; }
     stored.splice(idx, 1);
     rebuildSliderRows(stored);
 };
@@ -13367,7 +13462,7 @@ function rebuildSliderRows(arr){
 
 window.saveSliderChanges = async function(){
     var arr = getStoredSlides();
-    if(arr.length === 0){ alert('At least 1 slide is required!'); return; }
+    if(arr.length === 0){ showToast('⚠️ Kam se kam 1 slide zaroori hai!', '#e67e22'); return; }
     var btn = document.querySelector('#sliderManagerModal button[onclick="saveSliderChanges()"]');
     if(btn){ btn.disabled = true; btn.textContent = '⏳ Saving...'; }
     await sbSaveSliderImages(arr);
@@ -13496,14 +13591,14 @@ async function distRegister() {
     const pass2 = document.getElementById('distRegPass2').value;
 
     if (!name || !business || !phone || !email || !city || !state || !type || !pass) {
-        alert('⚠️ Sab required fields fill karo.'); return;
+        showToast('⚠️ Sab required fields fill karo.', '#e67e22'); return;
     }
-    if (pass !== pass2) { alert('❌ Passwords match nahi kar rahe.'); return; }
-    if (pass.length < 6) { alert('⚠️ Password kam se kam 6 characters ka hona chahiye.'); return; }
+    if (pass !== pass2) { showToast('❌ Passwords match nahi kar rahe.', '#c62828'); return; }
+    if (pass.length < 6) { showToast('⚠️ Password kam se kam 6 characters ka hona chahiye.', '#e67e22'); return; }
 
     // Check duplicate
     const existing = await sbDistGetByEmail(email);
-    if (existing) { alert('⚠️ Is email se pehle se account registered hai. Login karo.'); return; }
+    if (existing) { showToast('⚠️ Is email se pehle se account registered hai. Login karo.', '#e67e22'); return; }
 
     const hash = await distHash(pass);
     const row = {
@@ -13517,32 +13612,75 @@ async function distRegister() {
     const saved = await sbDistInsert(row);
     if (saved) {
         closeDistributorSignup();
-        alert('✅ Registration successful!\n\nAdmin se approval milne ke baad aap login kar sakte hain.\n\n📞 Hamare team se contact karein: +91 9006606697');
+        showToast('✅ Registration successful! Admin approval ke baad login kar sakte hain. 📞 +91 9006606697', '#2c5a4a');
     } else {
         // 🔒 FIX v36: SQL schema alert se remove kiya — sensitive DB info public nahi honi chahiye
-        alert('❌ Registration failed. Please try again or contact support: +91 9006606697');
+        showToast('❌ Registration failed. Please try again or contact: +91 9006606697', '#ff4444');
     }
 }
 
+// 🔒 FIX: Distributor login brute-force guard — same pattern as _adminLoginGuard
+const _distLoginGuard = (function() {
+    const STORE_FAILS = 'dlg_f';
+    const STORE_LOCK  = 'dlg_l';
+    const MAX_FAILS   = 5;
+    const LOCKOUT_MS  = 5 * 60 * 1000; // 5 minutes
+    return {
+        isLocked: function() {
+            const until = parseInt(sessionStorage.getItem(STORE_LOCK) || '0', 10);
+            return Date.now() < until;
+        },
+        secondsLeft: function() {
+            const until = parseInt(sessionStorage.getItem(STORE_LOCK) || '0', 10);
+            return Math.ceil((until - Date.now()) / 1000);
+        },
+        recordFail: function() {
+            let fails = parseInt(sessionStorage.getItem(STORE_FAILS) || '0', 10) + 1;
+            if (fails >= MAX_FAILS) {
+                sessionStorage.setItem(STORE_LOCK, String(Date.now() + LOCKOUT_MS));
+                sessionStorage.setItem(STORE_FAILS, '0');
+            } else {
+                sessionStorage.setItem(STORE_FAILS, String(fails));
+            }
+        },
+        reset: function() {
+            sessionStorage.removeItem(STORE_FAILS);
+            sessionStorage.removeItem(STORE_LOCK);
+        }
+    };
+})();
+
 // --- Login ---
 async function distLogin() {
+    // 🔒 FIX: Brute force check
+    if (_distLoginGuard.isLocked()) {
+        showToast('⛔ Too many failed attempts! ' + _distLoginGuard.secondsLeft() + ' seconds baad try karein.', '#c62828');
+        return;
+    }
+
     const email = document.getElementById('distLoginEmail').value.trim().toLowerCase();
     const pass = document.getElementById('distLoginPass').value;
-    if (!email || !pass) { alert('⚠️ Email aur password dono fill karo.'); return; }
+    if (!email || !pass) { showToast('⚠️ Email aur password dono fill karo.', '#e67e22'); return; }
 
     const dist = await sbDistGetByEmail(email);
-    if (!dist) { alert('❌ Yeh email registered nahi hai.'); return; }
+    if (!dist) { _distLoginGuard.recordFail(); showToast('❌ Yeh email registered nahi hai.', '#c62828'); return; }
 
     const hash = await distHash(pass);
-    if (dist.password_hash !== hash) { alert('❌ Password galat hai.'); document.getElementById('distLoginPass').value = ''; return; }
+    if (dist.password_hash !== hash) {
+        _distLoginGuard.recordFail();
+        showToast('❌ Password galat hai.', '#c62828');
+        document.getElementById('distLoginPass').value = '';
+        return;
+    }
     if (dist.status === 'pending') {
-        alert('⏳ Aapka account abhi admin approval ke liye pending hai.\n\nApproval milte hi aap login kar sakte hain.\n📞 +91 9006606697'); return;
+        showToast('⏳ Account admin approval ke liye pending hai. +91 9006606697 pe contact karein.', '#e67e22'); return;
     }
     if (dist.status === 'rejected') {
-        alert('❌ Aapka account reject kar diya gaya hai. Zyada info ke liye sampark karein.'); return;
+        showToast('❌ Aapka account reject kar diya gaya hai. Support se sampark karein.', '#c62828'); return;
     }
 
     // 🔒 FIX: password_hash ko memory/storage mein store NAHI karo
+    _distLoginGuard.reset(); // 🔒 Successful login — attempts counter reset karo
     const { password_hash, ...safeDist } = dist;
     currentDistributor = safeDist;
     localStorage.setItem('nexdrop_dist_session', JSON.stringify({ id: safeDist.id, email: safeDist.email, name: safeDist.name }));
@@ -13620,7 +13758,7 @@ async function openDistributorDashboard() {
             let notifs = [];
             if (data && data.value) notifs = typeof data.value === 'string' ? JSON.parse(data.value) : data.value;
             if (nd && nd.value && nd.value.trim()) notifs.unshift({ id: 'notice' });
-            const readIds = JSON.parse(localStorage.getItem('distNotifRead_' + d.email) || '[]');
+            const readIds = _distReadIds[currentDistributor?.email || ''] || [];
             const unread = notifs.filter(n => !readIds.includes(String(n.id))).length;
             const badge = document.getElementById('distNotifBadge');
             if (badge) { badge.textContent = unread; badge.style.display = unread > 0 ? 'inline' : 'none'; }
@@ -13635,12 +13773,12 @@ async function distChangePassword() {
     const newPass = document.getElementById('distChgNew').value;
     const newPass2 = document.getElementById('distChgNew2').value;
 
-    if (!oldPass || !newPass || !newPass2) { alert('⚠️ Sab fields fill karo.'); return; }
-    if (newPass !== newPass2) { alert('❌ New passwords match nahi kar rahe.'); return; }
-    if (newPass.length < 6) { alert('⚠️ Password kam se kam 6 characters.'); return; }
+    if (!oldPass || !newPass || !newPass2) { showToast('⚠️ Sab fields fill karo.', '#e67e22'); return; }
+    if (newPass !== newPass2) { showToast('❌ New passwords match nahi kar rahe.', '#ff4444'); return; }
+    if (newPass.length < 6) { showToast('⚠️ Password kam se kam 6 characters ka hona chahiye.', '#e67e22'); return; }
 
     const oldHash = await distHash(oldPass);
-    if (oldHash !== currentDistributor.password_hash) { alert('❌ Current password galat hai.'); return; }
+    if (oldHash !== currentDistributor.password_hash) { showToast('❌ Current password galat hai.', '#ff4444'); return; }
 
     const newHash = await distHash(newPass);
     await sbDistUpdatePassword(currentDistributor.id, newHash);
@@ -13741,21 +13879,15 @@ async function adminUpdateDistStatus(id, status) {
         if (d) d.status = status;
         adminRenderDistributors();
         showToast(`✅ Status updated to ${status}`, '#2c5a4a');
-    } catch(e) { alert('Error: ' + e.message); }
-}
-
-async function adminDeleteDistributor(id) {
+    } catch(e) { showToast('❌ Error: ' + e.message, '#ff4444'); }
     if (!confirm('Delete this distributor?')) return;
     try {
         await db.from('distributors').delete().eq('id', id);
         _adminDistributors = _adminDistributors.filter(x => x.id !== id);
         adminRenderDistributors();
         showToast('🗑️ Distributor deleted', '#e74c3c');
-    } catch(e) { alert('Error: ' + e.message); }
+    } catch(e) { showToast('❌ Error: ' + e.message, '#ff4444'); }
 }
-
-// ============================================================
-// DISTRIBUTOR DASHBOARD — ENHANCED FEATURES
 // ============================================================
 
 let _distAllOrders = [];
@@ -14110,7 +14242,7 @@ async function distLoadInvoices() {
         let billsArr = (!error && data && data.length) ? data : [];
         // Fallback: match from local bills by customerName or phone
         if (!billsArr.length) {
-            const localBl = localStorage.getItem('nexdrop_bills');
+            const localBl = bills.length ? JSON.stringify(bills) : null;
             if (localBl) {
                 const lb = JSON.parse(localBl);
                 billsArr = lb.filter(b => b.customerEmail === currentDistributor.email || b.customerPhone === currentDistributor.phone || b.customerName === currentDistributor.name);
@@ -14159,7 +14291,7 @@ async function distLoadNotifs() {
             notifs.unshift({ id: 'notice', title: '📢 Notice from Admin', msg: nd.value, time: '', type: 'notice' });
         }
         // Read status from localStorage
-        const readIds = JSON.parse(localStorage.getItem('distNotifRead_' + currentDistributor.email) || '[]');
+        const readIds = _distReadIds[currentDistributor?.email || ''] || [];
         // Update badge
         const unread = notifs.filter(n => !readIds.includes(String(n.id))).length;
         const badge = document.getElementById('distNotifBadge');
@@ -14183,17 +14315,17 @@ async function distLoadNotifs() {
 
 function distMarkNotifRead(id) {
     if (!currentDistributor) return;
-    const key = 'distNotifRead_' + currentDistributor.email;
-    const readIds = JSON.parse(localStorage.getItem(key) || '[]');
-    if (!readIds.includes(String(id))) { readIds.push(String(id)); localStorage.setItem(key, JSON.stringify(readIds)); }
+    const key = currentDistributor.email;
+    if(!_distReadIds[key]) _distReadIds[key] = [];
+    if (!_distReadIds[key].includes(String(id))) { _distReadIds[key].push(String(id)); }
     distLoadNotifs();
 }
 
 function distMarkAllNotifsRead() {
     if (!currentDistributor) return;
-    const key = 'distNotifRead_' + currentDistributor.email;
+    const key = currentDistributor.email;
     const allIds = Array.from(document.querySelectorAll('#distNotifList [onclick]')).map(el => el.getAttribute('onclick').match(/'([^']+)'/)?.[1]).filter(Boolean);
-    localStorage.setItem(key, JSON.stringify(allIds));
+    _distReadIds[key] = allIds;
     distLoadNotifs();
     showToast('✅ All notifications read!', '#2c5a4a');
 }

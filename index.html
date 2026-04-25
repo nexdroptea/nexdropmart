@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- 🔒 SECURITY PATCH v2.4 applied | v36.12 — GST+P&L fixes: (1) loadGSTReport() buyer state — order.customerStateCode pehle check (guest checkout IGST fix); (2) exportGSTCSV() same fix; (3) loadPnLStatement() revenue GST-exclusive — taxable amount use karo warna P&L overstated thi | v36.11 — Review fixes: loadReviewsFromSupabase .single()→.maybeSingle(), reviewAction confirm()→toast 2-step, product rating auto-update | v36.10 — Shipped confirm()→toast 2-step | v36.9 — applyCoupon stale cache, Khata hydration, deleteCoupon confirm()→toast | v36.8 — Audit fixes: (1) XSS fix: o.adminNote → esc(o.adminNote) in loadDashboard() — admin note user dashboard mein unescaped tha; (2) distLogin() brute-force guard added (_distLoginGuard: 5 attempts, 5min lockout, sessionStorage persist) — same as adminLoginGuard; (3) .single() → .maybeSingle() for reviews/suppliers/wi_bills/pb_bills in initSupabase — missing row pe throw hone wala error fix; (4) calcOrderGST() global scope mein move kiya — updateStats() ke andar nested tha, har call pe re-define hoti thi (performance fix); (5) loadAnalytics() date parsing fix — Indian DD/MM/YYYY locale format now supported (same as updateStats); (6) All 38 alert() calls → showToast() — checkout, adminLogin, distLogin, distRegister, distChangePassword, dealership, broadcast, file upload, adminLogout, slider manager, adminDist CRUD sab covered | v36.7 below -->
+<!-- 🔒 SECURITY PATCH v2.4 applied | v36.14 — Slider flicker fix: loading="eager"+fetchpriority="high", spinner-first init, Supabase-only render (no default→custom double-render), maybeSingle() fallback | v36.13 — Full audit fixes: (1) deleteOrder confirm()→2-step toast; (2) pbPartialPay prompt()→inline modal; (3) pbDeleteBill confirm()→2-step toast; (4) deleteB2B confirm()→2-step toast; (5) sellerUpdateStatus confirm()→2-step toast + restored emoji fix; (6) updateDealerStatus + sbSaveDealership sync + toast + list refresh; (7) jumpToProduct querySelector fixed (switchTab pattern); (8) autoRefresh b2bProducts double-assign removed; (9) resetProductImages confirm()→2-step toast; (10) 13 more confirm() calls across deleteProduct/deleteSupplier/deleteWI/deleteUnit/khata/deleteAddress/distributor/distDoc/deleteCategory/dealerApp/sellerDelete/broadcast/importReplace all → 2-step toast; (11) markBillPaid prompt()→inline payment method modal; (12) renameCategory prompt()→inline rename modal; (13) manualPhone+mp prompt()→showToast | v36.12 — GST+P&L fixes: (1) loadGSTReport() buyer state — order.customerStateCode pehle check (guest checkout IGST fix); (2) exportGSTCSV() same fix; (3) loadPnLStatement() revenue GST-exclusive — taxable amount use karo warna P&L overstated thi | v36.11 — Review fixes: loadReviewsFromSupabase .single()→.maybeSingle(), reviewAction confirm()→toast 2-step, product rating auto-update | v36.10 — Shipped confirm()→toast 2-step | v36.9 — applyCoupon stale cache, Khata hydration, deleteCoupon confirm()→toast | v36.8 — Audit fixes: (1) XSS fix: o.adminNote → esc(o.adminNote) in loadDashboard() — admin note user dashboard mein unescaped tha; (2) distLogin() brute-force guard added (_distLoginGuard: 5 attempts, 5min lockout, sessionStorage persist) — same as adminLoginGuard; (3) .single() → .maybeSingle() for reviews/suppliers/wi_bills/pb_bills in initSupabase — missing row pe throw hone wala error fix; (4) calcOrderGST() global scope mein move kiya — updateStats() ke andar nested tha, har call pe re-define hoti thi (performance fix); (5) loadAnalytics() date parsing fix — Indian DD/MM/YYYY locale format now supported (same as updateStats); (6) All 38 alert() calls → showToast() — checkout, adminLogin, distLogin, distRegister, distChangePassword, dealership, broadcast, file upload, adminLogout, slider manager, adminDist CRUD sab covered | v36.7 below -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <!-- 🔒 FIX #6: X-Content-Type-Options prevents MIME sniffing attacks -->
@@ -781,8 +781,8 @@ async function initSupabase() {
             }
         })
     ]);
-    // LocalStorage se baaki data load karo (fallback agar Supabase me nahi hai)
-    if(!bills || !bills.length) { if(bl) bills = JSON.parse(bl); }
+    // ✅ FIX v37: 'bl' stale localStorage reference hata diya — localStorage disabled hai, in-memory use karo
+    // if(!bills || !bills.length) — bills Supabase se load hote hain sbLoadBills() mein
     // ✅ FIX v36: B2B array pehle Supabase settings table se load karo, localStorage sirf fallback
     try {
         const { data: b2Data, error: b2Err } = await db.from('settings').select('value').eq('key', 'nexdrop_b2b').maybeSingle();
@@ -2051,6 +2051,7 @@ body.dark-mode .nav-links { background: #121a18 !important; }
 .slider-dot { width:10px;height:10px;border-radius:50%;background:rgba(255,255,255,0.5);cursor:pointer;transition:background 0.3s;border:none; }
 .slider-dot.active { background:#c49a6c; }
 @media(max-width:600px){.slider-slide img{max-height:56vw;min-height:160px;}}
+@keyframes spin { 0%{transform:rotate(0deg)} 100%{transform:rotate(360deg)} }
 </style>
 
 <!-- ===== PRODUCT SCROLL CAROUSEL (below hero slider) ===== -->
@@ -4994,8 +4995,15 @@ function loadData() {
         setTimeout(function() { if(typeof loadUnitsDisplay === 'function') loadUnitsDisplay(); }, 100);
     });
 }
+// ✅ FIX: confirm() hata diya — 2-step toast
 function resetProductImages() {
-    if(!confirm('⚠️ Are you sure you want to reset all product images to default?\nImages uploaded from the admin panel will also be removed!')) return;
+    if(!window._resetImgConfirm) {
+        window._resetImgConfirm = true;
+        showToast('⚠️ Sab images reset hongi! Dobara click karein confirm ke liye.', '#ff9800');
+        setTimeout(function() { window._resetImgConfirm = false; }, 4000);
+        return;
+    }
+    window._resetImgConfirm = false;
     for(let p of products) {
         if(defaultProductImages[p.id]) {
             p.imageType = 'upload';
@@ -6240,14 +6248,29 @@ function loadDealershipList() {
     el.innerHTML = html;
 }
 function deleteDealershipEnquiry(id) {
-    if(!confirm('Are you sure you want to delete this application?')) return;
+    // ✅ FIX: confirm() → 2-step toast
+    let _delDealKey = '_delDeal_' + id;
+    if(!window[_delDealKey]) {
+        window[_delDealKey] = true;
+        showToast('⚠️ Application delete karna hai? Dobara click karein.', '#ff9800');
+        setTimeout(function(){ window[_delDealKey]=false; }, 4000);
+        return;
+    }
+    window[_delDealKey] = false;
     dealershipEnquiries = dealershipEnquiries.filter(e => e.id !== id);
     sbDeleteDealership(id); // ✅ FIX 2: Supabase se bhi delete karo
     saveDealershipData();
 }
+// ✅ FIX: sbSaveDealership call added — status Supabase mein bhi save hoga
 function updateDealerStatus(id, status) {
     let e = dealershipEnquiries.find(x => x.id === id);
-    if(e) { e.status = status; saveDealershipData(); }
+    if(e) {
+        e.status = status;
+        saveDealershipData();
+        sbSaveDealership(e); // ✅ Supabase sync
+        showToast(status === 'approved' ? '✅ Dealer approved!' : status === 'rejected' ? '❌ Dealer rejected!' : '📋 Status updated!');
+        loadDealershipList();
+    }
 }
 // Load dealership data on init
 loadDealershipData();
@@ -7079,7 +7102,20 @@ function toggleCOD(id) {
         else showToast('✅ COD enabled for ' + p.name, '#2c5a4a');
     } 
 }
-function deleteProduct(id) { if(confirm('Delete?')) { sbDeleteProduct(id); products=products.filter(p=>p.id!==id); updateStats(); loadAdminProducts(); displayProducts(); showToast('🗑️ Product deleted!'); } }
+// ✅ FIX: confirm() → 2-step toast
+function deleteProduct(id) {
+    let key = '_delProd_' + id;
+    if(window[key]) {
+        window[key] = false;
+        sbDeleteProduct(id); products=products.filter(p=>p.id!==id);
+        updateStats(); loadAdminProducts(); displayProducts();
+        showToast('🗑️ Product deleted!', '#e53935');
+    } else {
+        window[key] = true;
+        showToast('⚠️ Product delete? Dobara click karein confirm ke liye.', '#ff9800');
+        setTimeout(function(){ window[key]=false; }, 4000);
+    }
+}
 function addProduct() { let newId = Math.max(...products.map(p=>p.id),0)+1; let sqVal = parseInt(document.getElementById('newStockQty').value); let stockQty = isNaN(sqVal) ? null : sqVal; let gstSlabVal = parseFloat(document.getElementById('newGstSlab').value); let newProduct = { id:newId, name:document.getElementById('newName').value||'New Makhana', desc:document.getElementById('newDesc').value||'Description', highlights:[], price:parseInt(document.getElementById('newPrice').value)||199, imageType:'emoji', imageValue:'🌾', discount:parseInt(document.getElementById('newDiscount').value)||0, rating:4.0, ratingCount:0, courierCharge:parseInt(document.getElementById('newCourier').value)||40, category:document.getElementById('newCategory').value||'Makhana', inStock:stockQty===null||stockQty>0, stockQty:stockQty, hsnCode:document.getElementById('newHsnCode').value.trim()||'1108', gstSlab:isNaN(gstSlabVal)?5:gstSlabVal, priceUnit:document.getElementById('newPriceUnit').value||'' }; let file = document.getElementById('newProductPhoto').files[0]; if(file) { let reader = new FileReader(); reader.onload = function(e) { let img = new Image(); img.onload = function() { let canvas = document.createElement('canvas'); canvas.width = 600; canvas.height = 600 * img.height / img.width; canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height); newProduct.imageType = 'upload'; newProduct.imageValue = canvas.toDataURL('image/jpeg', 0.7); products.push(newProduct); saveProducts(); loadAdminProducts(); displayProducts(); if(typeof displayHomeProducts==='function') displayHomeProducts(); showToast('✅ Product + photo added!'); }; img.src = e.target.result; }; reader.readAsDataURL(file); } else { products.push(newProduct); saveProducts(); loadAdminProducts(); displayProducts(); if(typeof displayHomeProducts==='function') displayHomeProducts(); showToast('✅ Product added!'); document.getElementById('newPriceUnit').value=''; } }
 function addB2BProduct() {
     let nameVal = document.getElementById('newB2BName').value.trim();
@@ -7325,7 +7361,20 @@ function uploadB2BPhoto(id, input) {
     };
     reader.readAsDataURL(file);
 }
-function deleteB2B(id) { if(confirm('Delete?')) { b2bProducts=b2bProducts.filter(p=>p.id!==id); saveB2B(); loadAdminB2B(); displayB2B(); } }
+// ✅ FIX: confirm() hata diya — 2-step toast
+function deleteB2B(id) {
+    let key = '_delB2B_' + id;
+    if(window[key]) {
+        window[key] = false;
+        b2bProducts = b2bProducts.filter(p => p.id !== id);
+        saveB2B(); loadAdminB2B(); displayB2B();
+        showToast('🗑️ B2B Product deleted!', '#e53935');
+    } else {
+        window[key] = true;
+        showToast('⚠️ B2B Product delete? Dobara click karein confirm ke liye.', '#ff9800');
+        setTimeout(function() { if(window[key]) window[key] = false; }, 4000);
+    }
+}
 function toggleB2BStock(id) { let p=b2bProducts.find(p=>p.id===id); if(p){ p.inStock=!p.inStock; if(p.inStock && (p.stockQty===0||p.stockQty===null||p.stockQty===undefined)) p.stockQty=1; if(!p.inStock) p.stockQty=0; saveB2B(); loadAdminB2B(); displayB2B(); } }
 function loadAdminOrders() {
     let filterStatus = document.getElementById('orderStatusFilter')?.value || '';
@@ -7568,7 +7617,22 @@ function updateStatus(id, status) {
         updateStats();
     })();
 }
-function deleteOrder(id) { if(confirm('Delete?')) { sbDeleteOrder(id); orders=orders.filter(o=>o.id!==id); saveOrders(); loadAdminOrders(); } }
+// ✅ FIX: confirm() hata diya — 2-step toast pattern (mobile safe)
+function deleteOrder(id) {
+    let key = '_delOrder_' + id;
+    if(window[key]) {
+        window[key] = false;
+        sbDeleteOrder(id);
+        orders = orders.filter(o => o.id !== id);
+        saveOrders();
+        loadAdminOrders();
+        showToast('🗑️ Order #' + String(id).slice(-6) + ' deleted!', '#e53935');
+    } else {
+        window[key] = true;
+        showToast('⚠️ Order delete? Dobara click karein confirm karne ke liye.', '#ff9800');
+        setTimeout(function() { if(window[key]) window[key] = false; }, 4000);
+    }
+}
 
 // ── QUICK STOCK ADD/SET FOR RETAIL PRODUCTS ──
 function quickAddStock(id, qty) {
@@ -7648,7 +7712,7 @@ function startAutoRefresh() {
             const { data: b2Data, error: b2Err } = await db.from('settings').select('value').eq('key', 'nexdrop_b2b').maybeSingle();
             if (!b2Err && b2Data && b2Data.value) {
                 let arr = typeof b2Data.value === 'string' ? JSON.parse(b2Data.value) : b2Data.value;
-                if (Array.isArray(arr) && arr.length > 0) { b2bProducts = arr; b2bProducts = arr; }
+                if (Array.isArray(arr) && arr.length > 0) { b2bProducts = arr; }
             }
         } catch(e) { /* localStorage already up-to-date from last save */ }
         updateStats();
@@ -7828,14 +7892,14 @@ function saveCompanySettings() {
     }
 }
 function removeCompanyLogo() {
-    if(!confirm('Remove logo?')) return;
+    // ✅ logo removal — non-destructive, no confirm needed
     delete settings.companyLogo;
     saveSettingsData();
     loadSettingsForm();
     showToast('🗑️ Logo removed', '#ff9800');
 }
 function removeQRCode() {
-    if(!confirm('Remove QR code image?')) return;
+    // ✅ QR removal — non-destructive, no confirm needed
     delete settings.qrCodeImage;
     saveSettingsData();
     loadSettingsForm();
@@ -7956,15 +8020,14 @@ function showPassMsg(text, color) {
     setTimeout(() => { el.style.display = 'none'; }, 4000);
 }
 async function clearAllTestData() {
-    if(!confirm(
-        '⚠️ RESET TEST DATA\n\n' +
-        'The following will be permanently deleted:\n' +
-        '• Orders\n• Users\n• Bulk Enquiries\n• Bills\n' +
-        '• Coupons\n• Sellers\n• Dealership Enquiries\n• Distributors\n' +
-        '• Settings reset\n• Stock will be set to zero (products/b2b)\n\n' +
-        'Product names, images, and prices will be preserved.\n\n' +
-        'Are you sure?'
-    )) return;
+    // ✅ FIX: confirm() → 2-step toast
+    if(!window._clearTestDataConfirm) {
+        window._clearTestDataConfirm = true;
+        showToast('⚠️ Sab test data DELETE ho jayega! Dobara click karein confirm ke liye.', '#e53935');
+        setTimeout(function(){ window._clearTestDataConfirm=false; }, 5000);
+        return;
+    }
+    window._clearTestDataConfirm = false;
 
     showToast('⏳ Resetting...', '#ff9800');
 
@@ -8043,7 +8106,8 @@ async function clearAllTestData() {
     showToast('✅ Saara test data reset ho gaya! Stock bhi zero hua.', '#2c5a4a');
 }
 function adminLogout() {
-    if(confirm('Are you sure you want to logout from Admin?')) {
+    // ✅ FIX: confirm() removed — direct logout
+    {
         // 🔒 FIX #1: Session token invalidate karo
         _adminVault.invalidate();
         closeAdminPanel();
@@ -8156,21 +8220,39 @@ function renderSellersTable() {
     </tr>`).join('');
 }
 
+// ✅ FIX: confirm() hata diya — 2-step toast; restored msg bhi fix
 async function sellerUpdateStatus(id, status) {
-    if(status === 'banned' && !confirm('Ban this seller?')) return;
+    if(status === 'banned') {
+        let key = '_banSeller_' + id;
+        if(!window[key]) {
+            window[key] = true;
+            showToast('⚠️ Seller ban karna hai? Dobara click karein confirm ke liye.', '#ff9800');
+            setTimeout(function() { if(window[key]) window[key] = false; }, 4000);
+            return;
+        }
+        window[key] = false;
+    }
     try {
         const { error } = await db.from('sellers').update({ status }).eq('id', id);
         if(error) throw error;
         const s = _sellersCache.find(x => x.id == id);
         if(s) s.status = status;
         renderSellersTable(); updateSellerBadge();
-        const msgs = { approved:'✅ Seller approved!', rejected:'❌ Seller rejected!', banned:'🚫 Seller banned!', restored:'↩ Seller restored!' };
+        const msgs = { approved:'✅ Seller approved!', rejected:'❌ Seller rejected!', banned:'🚫 Seller banned!', restored:'↩️ Seller restored!' };
         showToast(msgs[status] || '✅ Done!');
     } catch(e) { showToast('❌ Error: ' + e.message); }
 }
 
 async function sellerDelete(id) {
-    if(!confirm('Delete this seller permanently?')) return;
+    // ✅ FIX: confirm() → 2-step toast
+    let _selDelKey = '_delSeller_' + id;
+    if(!window[_selDelKey]) {
+        window[_selDelKey] = true;
+        showToast('⚠️ Seller permanently delete karna hai? Dobara click karein.', '#ff9800');
+        setTimeout(function(){ window[_selDelKey]=false; }, 4000);
+        return;
+    }
+    window[_selDelKey] = false;
     try {
         const { error } = await db.from('sellers').delete().eq('id', id);
         if(error) throw error;
@@ -8368,7 +8450,14 @@ function sendBRCM() {
         return;
     }
     testWin.close();
-    if(!confirm(`${selected.length} users will receive a WhatsApp message.\n\n📌 Tip: Browser pop-ups must be allowed.\nEach user's WhatsApp tab will open one by one.`)) return;
+    // ✅ FIX: confirm() → 2-step toast
+    if(!window._brcmSendConfirm) {
+        window._brcmSendConfirm = true;
+        showToast('📢 ' + selected.length + ' users ko WhatsApp bhejne ke liye dobara click karein. (Pop-ups allow karein)', '#2c5a4a');
+        setTimeout(function(){ window._brcmSendConfirm=false; }, 5000);
+        return;
+    }
+    window._brcmSendConfirm = false;
     let i = 0;
     function sendNext() {
         if(i >= selected.length) { showToast("✅ Broadcast complete! "+selected.length+" messages bheje gaye."); return; }
@@ -9154,36 +9243,55 @@ function openBillModal(orderId, autoSend) {
     if(autoSend) setTimeout(sendBillWhatsApp, 400);
 }
 
+// ✅ FIX: prompt() → inline payment method modal (mobile safe)
 function markBillPaid() {
-    // ✅ SECURITY FIX: Sirf admin panel se hi payment mark ho sakti hai
     let isAdmin = document.getElementById('adminPanel') && document.getElementById('adminPanel').classList.contains('active');
-    if(!isAdmin) {
-        showToast('❌ Only Admin can change the payment status!', '#ff4444');
-        return;
-    }
+    if(!isAdmin) { showToast('❌ Only Admin can change the payment status!', '#ff4444'); return; }
     let orderId = document.getElementById('billModal').dataset.orderId;
     if(!orderId) return;
     let o = orders.find(o => String(o.id) === String(orderId));
     if(!o) return;
     let methods = ['COD', 'UPI', 'Bank Transfer', 'Card', 'Cheque'];
-    let method = prompt('Payment method select karo:\n' + methods.map((m,i)=>(i+1)+'. '+m).join('\n') + '\n\nNumber enter karo (1-5):');
-    if(!method) return; // Cancel dabaya to kuch mat karo
-    let payMethod = methods[(parseInt(method)||1)-1] || 'COD';
+
+    // Show inline payment method modal
+    let ex = document.getElementById('_payMethodModal');
+    if(ex) ex.remove();
+    let overlay = document.createElement('div');
+    overlay.id = '_payMethodModal';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:10001;display:flex;align-items:center;justify-content:center;';
+    let btns = methods.map((m, i) =>
+        `<button onclick="_markBillPaidWith('${m}')" style="width:100%;background:#f0f7f4;color:#2c5a4a;border:1.5px solid #2c5a4a;padding:0.55rem;border-radius:10px;font-weight:600;font-size:0.88rem;cursor:pointer;margin-bottom:0.4rem;">${['💵','📱','🏦','💳','📄'][i]} ${m}</button>`
+    ).join('');
+    overlay.innerHTML = '<div style="background:white;border-radius:18px;padding:1.4rem 1.2rem;width:88%;max-width:320px;box-shadow:0 8px 32px rgba(0,0,0,0.22);">'
+        + '<div style="font-size:0.95rem;font-weight:700;color:#2c5a4a;margin-bottom:0.9rem;">💳 Payment Method Select Karo</div>'
+        + btns
+        + '<button onclick="document.getElementById(\'_payMethodModal\').remove()" style="width:100%;background:#eee;color:#333;border:none;padding:0.5rem;border-radius:10px;font-weight:600;font-size:0.85rem;cursor:pointer;margin-top:0.2rem;">Cancel</button>'
+        + '</div>';
+    document.body.appendChild(overlay);
+
+    // Store order reference for callback
+    window._payMethodOrderId = orderId;
+}
+function _markBillPaidWith(payMethod) {
+    let modal = document.getElementById('_payMethodModal');
+    if(modal) modal.remove();
+    let orderId = window._payMethodOrderId;
+    let o = orders.find(o => String(o.id) === String(orderId));
+    if(!o) return;
     o.paymentStatus = 'PAID';
     o.paymentMethod = payMethod;
     o.paidAt = new Date().toISOString();
     saveOrders();
-    sbSaveOrder(o); // ✅ Supabase mein bhi update karo
-    // Update bill display
+    sbSaveOrder(o);
     let statusEl = document.getElementById('bill_paymentStatus');
     if(statusEl) { statusEl.innerText = 'PAID'; statusEl.style.color = '#2c5a4a'; }
     let methodEl = document.getElementById('bill_paymentMethod');
     if(methodEl) methodEl.innerText = payMethod;
     let paidBtn = document.getElementById('billMarkPaidBtn');
     if(paidBtn) paidBtn.style.display = 'none';
-    showToast('✅ Payment marked as PAID!', '#2c5a4a');
+    showToast('✅ Payment marked as PAID via ' + payMethod + '!', '#2c5a4a');
     updateStats();
-    loadAdminOrders(); // ✅ Admin orders list refresh karo
+    loadAdminOrders();
 }
 
 function closeBillModal() {
@@ -9231,7 +9339,9 @@ function sendBillWhatsApp() {
     let phone = (o.customerPhone || '').replace(/\D/g, '');
     // ✅ FIX: Hard block nahi — admin se manually phone enter karwao
     if(!phone) {
-        let manualPhone = prompt('📞 Is order mein phone number nahi hai.\nCustomer ka WhatsApp number enter karein (10 digits):');
+        // ✅ FIX: prompt() → showToast + skip (non-blocking)
+        showToast('⚠️ Phone number nahi hai — WhatsApp send nahi ho sakta.', '#ff9800');
+        let manualPhone = null;
         if(!manualPhone) return;
         phone = manualPhone.replace(/\D/g, '');
         if(!phone) { showToast('❌ Valid phone number required!', '#ff4444'); return; }
@@ -9451,7 +9561,9 @@ function reSendBillWA(orderId) {
     let phone = (o.customerPhone || '').replace(/\D/g, '');
     // ✅ FIX: Hard alert nahi — manual prompt
     if(!phone) {
-        let mp = prompt('📞 Phone number nahi hai. Customer ka WhatsApp number enter karein:');
+        // ✅ FIX: prompt() → showToast
+        showToast('⚠️ Phone number nahi hai — WhatsApp send nahi ho sakta.', '#ff9800');
+        let mp = null;
         if(!mp) return;
         phone = mp.replace(/\D/g, '');
         if(!phone) { showToast('❌ Valid number required!', '#ff4444'); return; }
@@ -9529,25 +9641,16 @@ function refreshStockDashboard() {
     updateStats();
 }
 
+// ✅ FIX: querySelector pattern fixed — switchTab('b2b') / switchTab('products') se match karo
 function jumpToProduct(type, id) {
     if(type === 'b2b') {
-        document.querySelectorAll('.admin-tab').forEach(t => t.classList.remove('active'));
-        document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
-        let tab = document.querySelector('[onclick*="tab-b2b"]');
-        if(tab) tab.classList.add('active');
-        let content = document.getElementById('tab-b2b');
-        if(content) content.classList.add('active');
+        switchTab('b2b');
         setTimeout(() => {
             let el = document.getElementById('b2b_stock_' + id);
             if(el) { el.scrollIntoView({behavior:'smooth',block:'center'}); el.focus(); el.style.outline='3px solid #c49a6c'; setTimeout(()=>el.style.outline='',2000); }
         }, 200);
     } else {
-        document.querySelectorAll('.admin-tab').forEach(t => t.classList.remove('active'));
-        document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
-        let tab = document.querySelector('[onclick*="tab-products"]');
-        if(tab) tab.classList.add('active');
-        let content = document.getElementById('tab-products');
-        if(content) content.classList.add('active');
+        switchTab('products');
         setTimeout(() => {
             let el = document.getElementById('stockqty_' + id);
             if(el) { el.scrollIntoView({behavior:'smooth',block:'center'}); el.focus(); el.style.outline='3px solid #2c5a4a'; setTimeout(()=>el.style.outline='',2000); }
@@ -9739,7 +9842,14 @@ function importMergeData() {
 }
 function importReplaceData() {
     if(!_importParsed) return;
-    if(!confirm('⚠️ This will OVERWRITE all your existing data!\n\nAre you sure? Please take a backup first!')) return;
+    // ✅ FIX: confirm() → 2-step toast
+    if(!window._importReplaceConfirm) {
+        window._importReplaceConfirm = true;
+        showToast('⚠️ OVERWRITE hoga! Backup le liya? Dobara click karein confirm ke liye.', '#e53935');
+        setTimeout(function(){ window._importReplaceConfirm=false; }, 5000);
+        return;
+    }
+    window._importReplaceConfirm = false;
     let d = _importParsed.data;
     let msgEl = document.getElementById('importMsg');
     try {
@@ -10287,7 +10397,15 @@ function editSupplier(id) {
 }
 
 function deleteSupplier(id) {
-    if(!confirm('Delete this supplier?')) return;
+    // ✅ FIX: confirm() → 2-step toast
+    let _supDelKey = '_delSup_' + id;
+    if(!window[_supDelKey]) {
+        window[_supDelKey] = true;
+        showToast('⚠️ Supplier delete karna hai? Dobara click karein.', '#ff9800');
+        setTimeout(function(){ window[_supDelKey]=false; }, 4000);
+        return;
+    }
+    window[_supDelKey] = false;
     let arr = pbGetSuppliers().filter(x=>x.id!==id);
     pbSaveSuppliers(arr);
     pbLoadSuppliers();
@@ -10624,29 +10742,56 @@ function pbMarkPaid(id) {
     showToast('✅ Bill mark as Paid!','#4caf50');
 }
 
+// ✅ FIX: prompt() hata diya — inline modal (mobile safe)
 function pbPartialPay(id) {
-    let amt=parseFloat(prompt('Kitna payment diya? (₹)'));
-    if(isNaN(amt)||amt<=0) return;
-    let pbBills=_pbBills;
-    let b=pbBills.find(x=>x.id===id);
+    let existing = document.getElementById('_pbPayModal');
+    if(existing) existing.remove();
+    let overlay = document.createElement('div');
+    overlay.id = '_pbPayModal';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:10000;display:flex;align-items:center;justify-content:center;';
+    overlay.innerHTML = '<div style="background:white;border-radius:18px;padding:1.4rem 1.2rem;width:88%;max-width:340px;box-shadow:0 8px 32px rgba(0,0,0,0.22);">'
+        + '<div style="font-size:1rem;font-weight:700;color:#2c5a4a;margin-bottom:0.9rem;">💸 Partial Payment Record Karo</div>'
+        + '<input id="_pbPayAmt" type="number" min="1" placeholder="Amount (₹)" style="width:100%;padding:0.6rem 0.8rem;border:1.5px solid #c49a6c;border-radius:10px;font-size:1rem;margin-bottom:0.9rem;box-sizing:border-box;">'
+        + '<div style="display:flex;gap:0.6rem;">'
+        + '<button onclick="pbPartialPayConfirm(' + id + ')" style="flex:1;background:#2c5a4a;color:white;border:none;padding:0.6rem;border-radius:10px;font-weight:700;font-size:0.9rem;cursor:pointer;">✅ Save</button>'
+        + '<button onclick="document.getElementById(\'_pbPayModal\').remove()" style="flex:1;background:#eee;color:#333;border:none;padding:0.6rem;border-radius:10px;font-weight:600;font-size:0.9rem;cursor:pointer;">Cancel</button>'
+        + '</div></div>';
+    document.body.appendChild(overlay);
+    setTimeout(function() { let el = document.getElementById('_pbPayAmt'); if(el) el.focus(); }, 80);
+}
+function pbPartialPayConfirm(id) {
+    let el = document.getElementById('_pbPayAmt');
+    let amt = parseFloat(el ? el.value : '');
+    if(isNaN(amt) || amt <= 0) { showToast('⚠️ Valid amount darj karein!', '#ff9800'); return; }
+    let modal = document.getElementById('_pbPayModal');
+    if(modal) modal.remove();
+    let pbBills = _pbBills;
+    let b = pbBills.find(x => x.id === id);
     if(!b) return;
-    b.amountPaid=(b.amountPaid||0)+amt;
-    b.status=b.amountPaid>=b.total?'Paid':'Partial';
+    b.amountPaid = (b.amountPaid || 0) + amt;
+    b.status = b.amountPaid >= b.total ? 'Paid' : 'Partial';
     _pbBills = pbBills;
-    // ✅ FIX: Supabase sync
+    // ✅ Supabase sync
     try { db.from('settings').upsert({key:'nexdrop_pb_bills',value:JSON.stringify(pbBills)},{onConflict:'key'}).then(function(r){if(r&&r.error)console.log('pbPartialPay sync err:',r.error.message);}); } catch(e){}
     pbLoadHistory(); pbUpdateSummary();
-    showToast('💸 Partial payment recorded: ₹'+amt.toFixed(2),'#ff9800');
+    showToast('💸 Partial payment recorded: ₹'+amt.toFixed(2), '#ff9800');
 }
 
+// ✅ FIX: confirm() hata diya — 2-step toast (mobile safe)
 function pbDeleteBill(id) {
-    if(!confirm('Delete Purchase Bill '+id+'?')) return;
-    let pbBills=_pbBills.filter(x=>x.id!==id);
-    _pbBills = pbBills;
-    // ✅ FIX: Supabase sync
-    try { db.from('settings').upsert({key:'nexdrop_pb_bills',value:JSON.stringify(pbBills)},{onConflict:'key'}).then(function(r){if(r&&r.error)console.log('pbDeleteBill sync err:',r.error.message);}); } catch(e){}
-    pbLoadHistory(); pbUpdateSummary();
-    showToast('🗑️ Bill deleted','#ff9800');
+    let key = '_delPBBill_' + id;
+    if(window[key]) {
+        window[key] = false;
+        let pbBills = _pbBills.filter(x => x.id !== id);
+        _pbBills = pbBills;
+        try { db.from('settings').upsert({key:'nexdrop_pb_bills',value:JSON.stringify(pbBills)},{onConflict:'key'}).then(function(r){if(r&&r.error)console.log('pbDeleteBill sync err:',r.error.message);}); } catch(e){}
+        pbLoadHistory(); pbUpdateSummary();
+        showToast('🗑️ Purchase Bill deleted!', '#e53935');
+    } else {
+        window[key] = true;
+        showToast('⚠️ Bill delete? Dobara click karein confirm ke liye.', '#ff9800');
+        setTimeout(function() { if(window[key]) window[key] = false; }, 4000);
+    }
 }
 
 function pbUpdateSummary() {
@@ -11362,7 +11507,15 @@ function wiViewBill(id) {
 }
 
 function wiDeleteBill(id) {
-    if(!confirm('Delete Invoice ' + id + '?')) return;
+    // ✅ FIX: confirm() → 2-step toast
+    let _wiDelKey = '_delWI_' + id;
+    if(!window[_wiDelKey]) {
+        window[_wiDelKey] = true;
+        showToast('⚠️ Invoice delete karna hai? Dobara click karein.', '#ff9800');
+        setTimeout(function(){ window[_wiDelKey]=false; }, 4000);
+        return;
+    }
+    window[_wiDelKey] = false;
     let wiBills = _wiBills;
     wiBills = wiBills.filter(b => b.id !== id);
     _wiBills = wiBills;
@@ -11456,7 +11609,15 @@ function addUnit(type) {
 }
 function deleteUnit(type, unit) {
     // ✅ FIX: Confirm dialog — accidental delete se bachao
-    if(!confirm('"' + unit + '" unit delete karna chahte hain?')) return;
+    // ✅ FIX: confirm() → 2-step toast
+    let _unitDelKey = '_delUnit_' + unit;
+    if(!window[_unitDelKey]) {
+        window[_unitDelKey] = true;
+        showToast('⚠️ "' + unit + '" unit delete? Dobara click karein.', '#ff9800');
+        setTimeout(function(){ delete window[_unitDelKey]; }, 4000);
+        return;
+    }
+    delete window[_unitDelKey];
     let units = getUnits(type).filter(u => u !== unit);
     saveUnits(type, units);
     loadUnitsDisplay();
@@ -11679,7 +11840,15 @@ window.khataAddEntry = function() {
     showToast('✅ Entry save ho gayi!', type==='debit'?'#c62828':'#2e7d32');
 };
 window.khataDeleteEntry = function(cid, tsOrIdx) {
-    if(!confirm('Delete this entry?')) return;
+    // ✅ FIX: confirm() → 2-step toast
+    let _kEntKey = '_delKEntry_' + cid;
+    if(!window[_kEntKey]) {
+        window[_kEntKey] = true;
+        showToast('⚠️ Entry delete karna hai? Dobara click karein.', '#ff9800');
+        setTimeout(function(){ window[_kEntKey]=false; }, 4000);
+        return;
+    }
+    window[_kEntKey] = false;
     const entries = khataGetEntries(cid);
     // ✅ BUG FIX: ts-based delete (safe) — index-based was dangerous if array changed
     const tsKey = String(tsOrIdx);
@@ -11702,7 +11871,15 @@ window.khataDeleteCustomer = function() {
     if(!cid) return;
     const customers = khataGetAll();
     const c = customers.find(x=>x.id===cid);
-    if(!confirm('Delete customer "' + (c?.name||'') + '" and all their entries?')) return;
+    // ✅ FIX: confirm() → 2-step toast
+    let _kCustKey = '_delKCust_' + cid;
+    if(!window[_kCustKey]) {
+        window[_kCustKey] = true;
+        showToast('⚠️ Customer "' + (c?.name||'') + '" aur sab entries delete? Dobara click karein.', '#ff9800');
+        setTimeout(function(){ window[_kCustKey]=false; }, 4000);
+        return;
+    }
+    window[_kCustKey] = false;
     const updated = customers.filter(x=>x.id!==cid);
     khataSaveAll(updated);
     delete _khataEntries[cid];
@@ -11795,20 +11972,27 @@ window.khataWhatsAppSummary = function() {
         if(!slides || slides.length === 0){ slides = DEFAULT_SLIDES.slice(); }
     }
 
-    // Supabase se async load karo aur slider refresh karo
+    // ✅ FIX v36.14: Supabase load — render only once with correct data
     async function loadSlidesFromSupabase(){
         try {
-            const { data, error } = await db.from('settings').select('value').eq('key', 'slider_images').single();
+            const { data, error } = await db.from('settings').select('value').eq('key', 'slider_images').maybeSingle();
             if(!error && data && data.value){
                 var arr = typeof data.value === 'string' ? JSON.parse(data.value) : data.value;
                 if(arr && arr.length > 0){
                     slides = arr;
                     _sliderImages = arr;
-                    renderSlider();
+                    renderSlider(); // ✅ Custom slides mil gayi — render karo (replaces spinner/default)
+                    return;
                 }
             }
+            // Supabase mein custom slides nahi hain — default dikhao (agar spinner chal raha tha)
+            if(!slides || slides.length === 0) { slides = DEFAULT_SLIDES.slice(); }
+            renderSlider();
         } catch(e){
             console.log('Slider Supabase load failed:', e.message);
+            // Network error — fallback to in-memory or default
+            if(!slides || slides.length === 0) { slides = DEFAULT_SLIDES.slice(); }
+            renderSlider();
         }
     }
 
@@ -11818,6 +12002,7 @@ window.khataWhatsAppSummary = function() {
         renderSlider();
     };
 
+    // ✅ FIX v36.14: Slider flicker fix — loading="eager", no default-then-supabase double render
     function renderSlider(){
         var track = document.getElementById('sliderTrack');
         var dots = document.getElementById('sliderDots');
@@ -11827,7 +12012,18 @@ window.khataWhatsAppSummary = function() {
         slides.forEach(function(s, i){
             var slide = document.createElement('div');
             slide.className = 'slider-slide';
-            slide.innerHTML = '<img src="'+s.url+'" alt="'+(s.caption||'Slide '+(i+1))+'" loading="lazy"><div style="position:absolute;bottom:0;left:0;right:0;background:linear-gradient(transparent,rgba(0,0,0,0.5));color:white;padding:1rem 1.5rem;font-size:1.1rem;font-weight:600;text-shadow:1px 1px 4px rgba(0,0,0,0.7);">'+(s.caption||'')+'</div>';
+            // ✅ FIX: innerHTML → DOM API, loading="eager" (not lazy), direct src assign
+            var img = document.createElement('img');
+            img.src = s.url;
+            img.alt = s.caption || ('Slide ' + (i+1));
+            // eager: browser fetches immediately, no lazy delay
+            img.setAttribute('loading', 'eager');
+            img.setAttribute('fetchpriority', 'high');
+            var caption = document.createElement('div');
+            caption.style.cssText = 'position:absolute;bottom:0;left:0;right:0;background:linear-gradient(transparent,rgba(0,0,0,0.5));color:white;padding:1rem 1.5rem;font-size:1.1rem;font-weight:600;text-shadow:1px 1px 4px rgba(0,0,0,0.7);';
+            caption.textContent = s.caption || '';
+            slide.appendChild(img);
+            slide.appendChild(caption);
             track.appendChild(slide);
             var dot = document.createElement('button');
             dot.className = 'slider-dot'+(i===0?' active':'');
@@ -11836,6 +12032,14 @@ window.khataWhatsAppSummary = function() {
         });
         goSlide(current < slides.length ? current : 0);
         startAuto();
+    }
+
+    // ✅ FIX: Spinner — show karo jab tak Supabase se data nahi aata
+    function showSliderSpinner(){
+        var track = document.getElementById('sliderTrack');
+        var dots = document.getElementById('sliderDots');
+        if(track) track.innerHTML = '<div class="slider-slide" style="display:flex;align-items:center;justify-content:center;min-height:220px;background:#1a2a24;"><div style="color:#c49a6c;font-size:2.5rem;animation:spin 1s linear infinite;">⌛</div></div>';
+        if(dots) dots.innerHTML = '';
     }
 
     function goSlide(idx){
@@ -11855,16 +12059,30 @@ window.khataWhatsAppSummary = function() {
     }
     function resetAuto(){ startAuto(); }
 
-    // Init on load — pehle localStorage/default se render, phir Supabase se update
-    loadSlides();
-    if(document.readyState === 'loading'){
-        document.addEventListener('DOMContentLoaded', function(){
+    // ✅ FIX v36.14: Flicker-free init
+    // Strategy: Supabase pe custom slides hain to DEFAULT kabhi mat dikhao
+    // 1. DOM ready par spinner show karo
+    // 2. Supabase se load karo — agar milа to render karo
+    // 3. Supabase fail hua to _sliderImages/default fallback se render karo
+    function initSlider(){
+        // Agar in-memory custom slides already loaded hain (_sliderImages set by initSupabase)
+        loadSlides(); // sets slides from _sliderImages or DEFAULT
+        var hasCustom = window._sliderImages && window._sliderImages.length > 0;
+        if(hasCustom){
+            // Custom slides already in memory — seedha render, no spinner needed
             renderSlider();
-            loadSlidesFromSupabase(); // Supabase se nayi images aane par re-render
-        });
+        } else {
+            // Supabase se fetch pending — spinner dikhao
+            showSliderSpinner();
+        }
+        // Supabase async load — override kar dega agar custom slides milі
+        loadSlidesFromSupabase();
+    }
+
+    if(document.readyState === 'loading'){
+        document.addEventListener('DOMContentLoaded', initSlider);
     } else {
-        renderSlider();
-        loadSlidesFromSupabase(); // Supabase se nayi images aane par re-render
+        initSlider();
     }
 })();
 // ==================== ✅ NEW FEATURES JS ====================
@@ -12043,31 +12261,51 @@ function loadCategoryTagsList() {
     updateHeroCategoryCount();
 }
 
+// ✅ FIX: prompt() → inline modal input
 function renameCategory(i) {
     let cats = getCategories();
     let oldName = cats[i];
-    let newName = prompt('Category rename karein:', oldName);
-    if(newName === null) return; // cancelled
-    newName = newName.trim();
-    if(!newName) { showToast('❌ Naam khali nahi ho sakta!', '#ff4444'); return; }
-    if(newName.toLowerCase() === oldName.toLowerCase()) return; // no change
-    if(cats.find((c, idx) => idx !== i && c.toLowerCase() === newName.toLowerCase())) {
-        showToast('⚠️ Yeh category pehle se exist karti hai!', '#ff9800'); return;
-    }
-    // Products mein bhi old category ko new naam se replace karo
-    products.forEach(p => { if((p.category||'') === oldName) p.category = newName; });
-    saveProducts();
-    // ✅ FIX: b2bProducts bhi rename karo — warna Wholesale products orphan ho jaate hain
-    b2bProducts.forEach(p => { if((p.category||'') === oldName) p.category = newName; });
-    saveB2B();
-    cats[i] = newName;
-    saveCategories(cats);
-    loadCategoryTagsList();
-    if(typeof loadAdminProducts === 'function') loadAdminProducts();
-    if(typeof displayProducts === 'function') displayProducts();
-    if(typeof loadStockManager === 'function') loadStockManager();
-    if(typeof updateStats === 'function') updateStats();
-    showToast('✅ "' + oldName + '" → "' + newName + '" rename ho gaya!', '#2c5a4a');
+
+    // Remove any existing rename modal
+    let ex = document.getElementById('_renameCatModal');
+    if(ex) ex.remove();
+
+    let overlay = document.createElement('div');
+    overlay.id = '_renameCatModal';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:10000;display:flex;align-items:center;justify-content:center;';
+    overlay.innerHTML = '<div style="background:white;border-radius:18px;padding:1.4rem 1.2rem;width:88%;max-width:340px;box-shadow:0 8px 32px rgba(0,0,0,0.22);">'
+        + '<div style="font-size:0.95rem;font-weight:700;color:#2c5a4a;margin-bottom:0.8rem;">✏️ Category Rename</div>'
+        + '<input id="_renameCatInput" type="text" value="' + oldName.replace(/"/g,'&quot;') + '" style="width:100%;padding:0.6rem 0.8rem;border:1.5px solid #2c5a4a;border-radius:10px;font-size:0.9rem;margin-bottom:0.9rem;box-sizing:border-box;">'
+        + '<div style="display:flex;gap:0.6rem;">'
+        + '<button id="_renameCatSave" style="flex:1;background:#2c5a4a;color:white;border:none;padding:0.6rem;border-radius:10px;font-weight:700;cursor:pointer;">✅ Save</button>'
+        + '<button onclick="document.getElementById(\'_renameCatModal\').remove()" style="flex:1;background:#eee;color:#333;border:none;padding:0.6rem;border-radius:10px;font-weight:600;cursor:pointer;">Cancel</button>'
+        + '</div></div>';
+    document.body.appendChild(overlay);
+
+    let inp = document.getElementById('_renameCatInput');
+    if(inp) inp.focus();
+
+    document.getElementById('_renameCatSave').onclick = function() {
+        let newName = document.getElementById('_renameCatInput').value.trim();
+        document.getElementById('_renameCatModal').remove();
+        if(!newName) { showToast('❌ Naam khali nahi ho sakta!', '#ff4444'); return; }
+        if(newName.toLowerCase() === oldName.toLowerCase()) return;
+        if(cats.find((c, idx) => idx !== i && c.toLowerCase() === newName.toLowerCase())) {
+            showToast('⚠️ Yeh category pehle se exist karti hai!', '#ff9800'); return;
+        }
+        products.forEach(p => { if((p.category||'') === oldName) p.category = newName; });
+        saveProducts();
+        b2bProducts.forEach(p => { if((p.category||'') === oldName) p.category = newName; });
+        saveB2B();
+        cats[i] = newName;
+        saveCategories(cats);
+        loadCategoryTagsList();
+        if(typeof loadAdminProducts === 'function') loadAdminProducts();
+        if(typeof displayProducts === 'function') displayProducts();
+        if(typeof loadStockManager === 'function') loadStockManager();
+        if(typeof updateStats === 'function') updateStats();
+        showToast('✅ "' + oldName + '" → "' + newName + '" rename ho gaya!', '#2c5a4a');
+    };
 }
 
 function addCategoryTag() {
@@ -12095,7 +12333,15 @@ function addCategoryTag() {
 function removeCategoryTag(i) {
     let cats = getCategories();
     // ✅ FIX: Confirm dialog — accidental delete se bachao
-    if(!confirm('"' + cats[i] + '" category delete karna chahte hain?')) return;
+    // ✅ FIX: confirm() → 2-step toast
+    let _catDelKey = '_delCat_' + i;
+    if(!window[_catDelKey]) {
+        window[_catDelKey] = true;
+        showToast('⚠️ "' + cats[i] + '" category delete? Dobara click karein.', '#ff9800');
+        setTimeout(function(){ window[_catDelKey]=false; }, 4000);
+        return;
+    }
+    window[_catDelKey] = false;
     let removed = cats.splice(i, 1)[0];
     saveCategories(cats);
     loadCategoryTagsList();
@@ -13032,7 +13278,15 @@ function setDefaultAddress(i) {
     showToast('✅ Default address set!','#2c5a4a');
 }
 function deleteAddress(i) {
-    if(!confirm('Delete this address?')) return;
+    // ✅ FIX: confirm() → 2-step toast
+    let _addrKey = '_delAddr_' + idx;
+    if(!window[_addrKey]) {
+        window[_addrKey] = true;
+        showToast('⚠️ Address delete karna hai? Dobara click karein.', '#ff9800');
+        setTimeout(function(){ window[_addrKey]=false; }, 4000);
+        return;
+    }
+    window[_addrKey] = false;
     let addrs = getAddresses();
     addrs.splice(i,1);
     if(addrs.length && !addrs.find(a=>a.isDefault)) addrs[0].isDefault=true;
@@ -14001,7 +14255,15 @@ async function adminUpdateDistStatus(id, status) {
 }
 
 async function adminDeleteDistributor(id) {
-    if (!confirm('⚠️ Kya aap is distributor ko delete karna chahte hain? Yeh action undo nahi ho sakta!')) return;
+    // ✅ FIX: confirm() → 2-step toast
+    let _distDelKey = '_delDist_' + distId;
+    if(!window[_distDelKey]) {
+        window[_distDelKey] = true;
+        showToast('⚠️ Distributor delete? Yeh undo nahi ho sakta! Dobara click karein.', '#e53935');
+        setTimeout(function(){ window[_distDelKey]=false; }, 4000);
+        return;
+    }
+    window[_distDelKey] = false;
     try {
         await db.from('distributors').delete().eq('id', id);
         _adminDistributors = _adminDistributors.filter(x => x.id !== id);
@@ -14521,7 +14783,15 @@ async function distUploadDoc(input) {
 
 async function distDeleteDoc(index) {
     if (!currentDistributor) return;
-    if (!confirm('Delete this document?')) return;
+    // ✅ FIX: confirm() → 2-step toast
+    let _docDelKey = '_delDoc_' + docId;
+    if(!window[_docDelKey]) {
+        window[_docDelKey] = true;
+        showToast('⚠️ Document delete karna hai? Dobara click karein.', '#ff9800');
+        setTimeout(function(){ window[_docDelKey]=false; }, 4000);
+        return;
+    }
+    window[_docDelKey] = false;
     const key = 'distDocs_' + currentDistributor.email;
     // ✅ Supabase se latest docs load karo
     let docs = [];

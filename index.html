@@ -909,6 +909,12 @@ async function initSupabase() {
                 console.log('✅ App settings Supabase se load hue!');
             }
         }
+        // ✅ FIX v38: QR code alag key se load karo (reliable, size issue nahi)
+        const { data: qrRes } = await db.from('settings').select('value').eq('key', 'nexdrop_qr_code').maybeSingle();
+        if(qrRes && qrRes.value) {
+            settings.qrCodeImage = qrRes.value;
+            console.log('✅ Admin QR code Supabase se load hua!');
+        }
         // ✅ FIX v23: Units Supabase se load karo
         const { data: rUnitsRes, error: rUnitsErr } = await db.from('settings').select('value').eq('key', 'nexdrop_retail_units').maybeSingle();
         if(!rUnitsErr && rUnitsRes && rUnitsRes.value) {
@@ -1013,6 +1019,19 @@ function esc(str) {
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;')
         .replace(/'/g, '&#39;');
+}
+// 👁️ Password eye toggle — input ke type ko password/text toggle karo
+function toggleEye(inputId, eyeId) {
+    let inp = document.getElementById(inputId);
+    let eye = document.getElementById(eyeId);
+    if(!inp) return;
+    if(inp.type === 'password') {
+        inp.type = 'text';
+        if(eye) eye.style.opacity = '0.4';
+    } else {
+        inp.type = 'password';
+        if(eye) eye.style.opacity = '1';
+    }
 }
 // ✅ FIX: Collision-safe order ID — Date.now() + random suffix (4 digits)
 // crypto.randomUUID() nahi use karte — Supabase bigint ke saath compatible rakhna hai
@@ -2031,6 +2050,8 @@ body.dark-mode .nav-links { background: #121a18 !important; }
    END RESPONSIVE IMPROVEMENTS
    ============================================================ */
 </style>
+<!-- ✅ Real QR Code library — UPI QR generation ke liye -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 </head>
 <body>
 
@@ -2527,8 +2548,16 @@ body.dark-mode .nav-links { background: #121a18 !important; }
       <div style="text-align:center;margin-bottom:1rem;">
         <div style="font-size:0.8rem;font-weight:700;color:#333;margin-bottom:0.6rem;">📷 Scan QR Code to Pay</div>
         <div style="background:#f5f0ea;border-radius:16px;padding:0.8rem;display:inline-block;border:2px solid #1565c0;">
-          <!-- SBI QR — embedded as the actual bank QR image uploaded by user -->
-          <img src="data:image/png;base64," id="upiQRImg" style="width:200px;height:200px;object-fit:contain;border-radius:8px;" onerror="this.style.display='none';document.getElementById('upiQRFallback').style.display='flex'">
+          <!-- Loading state -->
+          <div id="upiQRLoading" style="width:200px;height:200px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:0.5rem;background:white;border-radius:8px;">
+            <div style="font-size:2rem;">⏳</div>
+            <div style="font-size:0.7rem;color:#888;">Loading QR...</div>
+          </div>
+          <!-- Uploaded QR image -->
+          <img id="upiQRImg" style="display:none;width:200px;height:200px;object-fit:contain;border-radius:8px;">
+          <!-- Generated QR canvas -->
+          <div id="upiQRDiv" style="display:none;width:200px;height:200px;align-items:center;justify-content:center;border-radius:8px;background:white;"></div>
+          <!-- Fallback -->
           <div id="upiQRFallback" style="display:none;width:200px;height:200px;background:#f0f7ff;border-radius:8px;flex-direction:column;align-items:center;justify-content:center;gap:0.5rem;">
             <div style="font-size:3rem;">📱</div>
             <div style="font-size:0.72rem;color:#555;text-align:center;padding:0 0.5rem;">UPI QR — Use UPI ID below to pay</div>
@@ -2546,11 +2575,7 @@ body.dark-mode .nav-links { background: #121a18 !important; }
         </div>
       </div>
 
-      <!-- Direct UPI Pay Button -->
-      <a id="upiDirectLink" href="#" onclick="return openUPIDirect()" style="display:block;text-align:center;background:linear-gradient(135deg,#1565c0,#0d47a1);color:white;padding:0.8rem;border-radius:12px;font-weight:800;font-size:0.95rem;text-decoration:none;margin-bottom:0.7rem;">
-        🚀 Open UPI App Directly
-      </a>
-      <div style="font-size:0.68rem;color:#888;text-align:center;margin-bottom:0.8rem;">Tap on mobile — opens your UPI payment app directly</div>
+
 
       <!-- Bank Details -->
       <div style="background:#f9f6f2;border-radius:10px;padding:0.7rem;font-size:0.72rem;color:#555;border:1px solid #e0d8d0;margin-bottom:0.8rem;">
@@ -2588,7 +2613,10 @@ body.dark-mode .nav-links { background: #121a18 !important; }
   <div id="userLoginForm">
     <p style="font-size:0.85rem;color:#6b5e4a;margin-bottom:0.5rem;">✅ Please enter your Email ID to continue</p>
     <input type="email" id="userEmail" placeholder="Email Address" style="margin-bottom:0.5rem;">
-    <input type="password" id="userLoginPass" placeholder="Password (if set)" style="margin-bottom:0.5rem;">
+    <div style="position:relative;margin-bottom:0.5rem;">
+      <input type="password" id="userLoginPass" placeholder="Password (if set)" style="margin-bottom:0;width:100%;padding-right:2.5rem;box-sizing:border-box;">
+      <span onclick="toggleEye('userLoginPass','eyeLogin')" id="eyeLogin" style="position:absolute;right:0.8rem;top:50%;transform:translateY(-50%);cursor:pointer;font-size:1.1rem;user-select:none;">👁️</span>
+    </div>
     <button onclick="checkUserEmail()">Continue &#8594;</button>
     <div style="text-align:center;margin-top:0.4rem;">
       <span onclick="showForgotPassword()" style="font-size:0.78rem;color:#c49a6c;cursor:pointer;text-decoration:underline;">🔑 Forgot Password?</span>
@@ -2601,9 +2629,15 @@ body.dark-mode .nav-links { background: #121a18 !important; }
     <p style="font-size:0.75rem;color:#6b5e4a;margin-bottom:0.6rem;">Please enter your registered Email and Phone number for verification.</p>
     <input type="email" id="fpEmail" placeholder="Registered Email Address *" style="margin-bottom:0.5rem;">
     <input type="tel" id="fpPhone" placeholder="Registered Mobile Number (10 digits) *" style="margin-bottom:0.5rem;" maxlength="10">
-    <input type="password" id="fpNewPass" placeholder="New Password *" style="margin-bottom:0.3rem;">
+    <div style="position:relative;margin-bottom:0.3rem;">
+      <input type="password" id="fpNewPass" placeholder="New Password *" style="margin-bottom:0;width:100%;padding-right:2.5rem;box-sizing:border-box;">
+      <span onclick="toggleEye('fpNewPass','eyeFpNew')" id="eyeFpNew" style="position:absolute;right:0.8rem;top:50%;transform:translateY(-50%);cursor:pointer;font-size:1.1rem;user-select:none;">👁️</span>
+    </div>
     <small style="color:#888;font-size:0.72rem;display:block;margin-bottom:0.5rem;padding:0 0.2rem;">Min 8 chars, 1 Capital, 1 Number, 1 Special (!@#$%^&*)</small>
-    <input type="password" id="fpConfPass" placeholder="Confirm New Password *" style="margin-bottom:0.5rem;">
+    <div style="position:relative;margin-bottom:0.5rem;">
+      <input type="password" id="fpConfPass" placeholder="Confirm New Password *" style="margin-bottom:0;width:100%;padding-right:2.5rem;box-sizing:border-box;">
+      <span onclick="toggleEye('fpConfPass','eyeFpConf')" id="eyeFpConf" style="position:absolute;right:0.8rem;top:50%;transform:translateY(-50%);cursor:pointer;font-size:1.1rem;user-select:none;">👁️</span>
+    </div>
     <div id="fpMsg" style="font-size:0.78rem;min-height:1.2rem;margin-bottom:0.4rem;text-align:center;padding:0.3rem;border-radius:6px;"></div>
     <button onclick="doForgotPassword()" style="background:#c49a6c;">✅ Reset Password</button>
     <button onclick="clearAndShowLogin()" style="background:#f5f0ea;color:#2c5a4a;margin-top:0.4rem;">← Back to Login</button>
@@ -2662,6 +2696,16 @@ body.dark-mode .nav-links { background: #121a18 !important; }
     </div>
 
     <div id="userInfo" style="background:#f5f0ea;border-radius:12px;padding:0.8rem;margin-bottom:0.6rem;font-size:0.82rem;line-height:1.7;"></div>
+
+    <!-- 🛒 Cart Items in User Panel -->
+    <div id="userCartSection" style="display:none;background:#fff8f0;border-radius:12px;padding:0.8rem;margin-bottom:0.6rem;border:1px solid #f0c080;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem;">
+        <strong style="color:#c49a6c;font-size:0.88rem;">🛒 My Cart</strong>
+        <button onclick="closeUserPanel();toggleCart();" style="background:#2c5a4a;color:white;border:none;padding:0.25rem 0.7rem;border-radius:20px;font-size:0.7rem;cursor:pointer;font-weight:600;">View Cart →</button>
+      </div>
+      <div id="userCartItems" style="font-size:0.8rem;"></div>
+      <div id="userCartTotal" style="text-align:right;font-weight:700;color:#c49a6c;font-size:0.88rem;margin-top:0.4rem;border-top:1px solid #f0c080;padding-top:0.4rem;"></div>
+    </div>
 
     <!-- Loyalty Points Panel -->
     <div id="loyaltyPanel" style="display:none;background:#fffde7;border:1px solid #ffd54f;border-radius:12px;padding:0.8rem;margin-bottom:0.6rem;">
@@ -2740,9 +2784,18 @@ body.dark-mode .nav-links { background: #121a18 !important; }
   <div id="changeUserPassSection" style="display:none;">
     <h4 style="color:#2c5a4a;margin-bottom:0.7rem;">🔐 Change Password</h4>
     <div id="userPassMsg" style="display:none;padding:0.5rem;border-radius:8px;margin-bottom:0.5rem;font-size:0.8rem;"></div>
-    <input type="password" id="userOldPass" placeholder="Current Password (leave blank if none)">
-    <input type="password" id="userNewPass" placeholder="New Password *">
-    <input type="password" id="userConfPass" placeholder="Confirm New Password *">
+    <div style="position:relative;margin-bottom:0.5rem;">
+      <input type="password" id="userOldPass" placeholder="Current Password (leave blank if none)" style="margin-bottom:0;width:100%;padding-right:2.5rem;box-sizing:border-box;">
+      <span onclick="toggleEye('userOldPass','eyeOld')" id="eyeOld" style="position:absolute;right:0.8rem;top:50%;transform:translateY(-50%);cursor:pointer;font-size:1.1rem;user-select:none;">👁️</span>
+    </div>
+    <div style="position:relative;margin-bottom:0.5rem;">
+      <input type="password" id="userNewPass" placeholder="New Password *" style="margin-bottom:0;width:100%;padding-right:2.5rem;box-sizing:border-box;">
+      <span onclick="toggleEye('userNewPass','eyeNew')" id="eyeNew" style="position:absolute;right:0.8rem;top:50%;transform:translateY(-50%);cursor:pointer;font-size:1.1rem;user-select:none;">👁️</span>
+    </div>
+    <div style="position:relative;margin-bottom:0.5rem;">
+      <input type="password" id="userConfPass" placeholder="Confirm New Password *" style="margin-bottom:0;width:100%;padding-right:2.5rem;box-sizing:border-box;">
+      <span onclick="toggleEye('userConfPass','eyeConf')" id="eyeConf" style="position:absolute;right:0.8rem;top:50%;transform:translateY(-50%);cursor:pointer;font-size:1.1rem;user-select:none;">👁️</span>
+    </div>
     <button onclick="saveUserPassword()">💾 Save Password</button>
     <button onclick="closeChangeUserPassword()" style="background:#f5f0ea;color:#2c5a4a;margin-top:0.4rem;">← Back</button>
   </div>
@@ -5058,12 +5111,37 @@ let users = [];
 let bills = [];
 let bulkEnquiries = [], cart = [], currentUser = null;
 
-// ✅ FIX: Cart localStorage mein persist karo — page refresh pe cart na kho
+// ✅ FIX v38: Cart Supabase mein sync hoga (logged-in users ke liye)
+// Guest users ke liye cart in-memory rahega (tab tak)
 function saveCart() {
-    // Cart session-only — reload pe clear hoga, localStorage save nahi
+    if(currentUser && currentUser.email) {
+        try {
+            db.from('settings').upsert(
+                { key: 'nexdrop_cart_' + currentUser.email, value: JSON.stringify(cart) },
+                { onConflict: 'key' }
+            ).then(function(r){ if(r && r.error) console.log('saveCart Supabase err:', r.error.message); });
+        } catch(e) { console.log('saveCart error:', e.message); }
+    }
+    // Guest users: in-memory only (no localStorage — no persistence needed for guests)
 }
 function loadCart() {
-    cart = []; // Har reload pe fresh cart
+    cart = []; // Fresh start. Logged-in users ka cart sbLoadUserCart() se load hoga after login.
+}
+// Logged-in user ka saved cart Supabase se restore karo
+async function sbLoadUserCart() {
+    if(!currentUser || !currentUser.email) return;
+    try {
+        const { data, error } = await db.from('settings').select('value').eq('key', 'nexdrop_cart_' + currentUser.email).maybeSingle();
+        if(!error && data && data.value) {
+            const saved = typeof data.value === 'string' ? JSON.parse(data.value) : data.value;
+            if(Array.isArray(saved) && saved.length > 0) {
+                cart = saved;
+                updateCartCount();
+                renderCart();
+                console.log('✅ Cart restored from Supabase:', cart.length, 'items');
+            }
+        }
+    } catch(e) { console.log('sbLoadUserCart error:', e.message); }
 }
 let settings = { defaultCourier: 40, freeMin: 999, whatsappNo: "919006606697", sellerStateCode: "10", qrCodeImage: null, upiId: "43459091963@sbi", bankAccount: "43459091963", bankName: "State Bank of India", bankIFSC: "SBIN0018623", accountName: "Nexdrop Solutions Pvt. Ltd." };
 
@@ -5287,7 +5365,7 @@ function saveAllB2B() {
 }
 function saveSettingsData() {
     // 🔒 FIX #7: adminPassword kabhi localStorage mein store nahi hoga
-    const { adminPassword, ...safeSettings } = settings;
+    const { adminPassword, qrCodeImage, ...safeSettings } = settings; // ✅ FIX v38: qrCodeImage alag nexdrop_qr_code key mein hai — nexdrop_settings se exclude karo
     // settings saved to Supabase below
     // ✅ FIX v23: Settings Supabase mein bhi sync karo
     try {
@@ -5830,16 +5908,32 @@ function openProductModal(type, id) {
             upiBtn.onclick = function() {
                 // ✅ FIX: Login check - bina login ke UPI modal nahi khulega
                 if(!currentUser) { showToast('❌ Please login first!', '#ff4444'); openUserPanel(); return; }
-                window._upiTotal = total;
-                window._upiId = settings.upiId || '43459091963@sbi';
-                let qrImg = document.getElementById('upiQRImg');
-                let upiId = window._upiId;
-                let upiLink = 'upi://pay?pa=' + encodeURIComponent(upiId) + '&pn=' + encodeURIComponent(settings.companyName||'Nexdrop Solutions') + '&am=' + total + '&cu=INR';
-                setQRCode(qrImg, document.getElementById('upiQRFallback'), upiLink, upiId);
-                document.getElementById('upiModalAmount').textContent = '₹' + total;
-                document.getElementById('upiIdDisplay').textContent = upiId;
-                document.getElementById('upiPayModal').style.display = 'block';
-                document.body.style.overflow = 'hidden';
+                async function _openUPIWithQR() {
+                    window._upiTotal = total;
+                    window._upiId = settings.upiId || '43459091963@sbi';
+                    let upiId = window._upiId;
+                    // Modal + loading pehle open karo
+                    const _ldEl = document.getElementById('upiQRLoading');
+                    const _imgEl = document.getElementById('upiQRImg');
+                    const _divEl = document.getElementById('upiQRDiv');
+                    const _fbEl = document.getElementById('upiQRFallback');
+                    if(_ldEl) _ldEl.style.display = 'flex';
+                    if(_imgEl) _imgEl.style.display = 'none';
+                    if(_divEl) _divEl.style.display = 'none';
+                    if(_fbEl) _fbEl.style.display = 'none';
+                    document.getElementById('upiModalAmount').textContent = '₹' + total;
+                    document.getElementById('upiIdDisplay').textContent = upiId;
+                    document.getElementById('upiPayModal').style.display = 'block';
+                    document.body.style.overflow = 'hidden';
+                    // Supabase se QR fetch karo
+                    if(!settings.qrCodeImage) {
+                        const { data: _qr } = await db.from('settings').select('value').eq('key','nexdrop_qr_code').maybeSingle();
+                        if(_qr && _qr.value) settings.qrCodeImage = _qr.value;
+                    }
+                    let upiLink = 'upi://pay?pa=' + encodeURIComponent(upiId) + '&pn=' + encodeURIComponent(settings.companyName||'Nexdrop Solutions') + '&am=' + total + '&cu=INR';
+                    setQRCode(_imgEl, _fbEl, upiLink, upiId);
+                }
+                _openUPIWithQR();
             };
         } else if(upiWrap) {
             upiWrap.style.display = 'none';
@@ -5987,14 +6081,22 @@ function addToCart(id, type) {
         // Use a negative id namespace for b2b to avoid collision with retail ids
         let cartKey = 'b2b_'+id;
         let item = cart.find(i => i.cartKey === cartKey);
-        if(item) item.quantity++;
-        else cart.push({ id: id, cartKey: cartKey, name: p.name, price: discPrice, quantity: 1, courierCharge: 0, isB2B: true, orderType: 'wholesale' });
+        if(item) {
+            if(p.stockQty !== null && p.stockQty !== undefined && item.quantity >= p.stockQty) {
+                showToast('⚠️ Only ' + p.stockQty + ' units available!', '#ff9800'); return;
+            }
+            item.quantity++;
+        } else cart.push({ id: id, cartKey: cartKey, name: p.name, price: discPrice, quantity: 1, courierCharge: 0, isB2B: true, orderType: 'wholesale' });
         saveCart(); updateCartCount(); renderCart(); return;
     }
     // Retail
     let item = cart.find(i => i.id === id && !i.isB2B);
-    if(item) item.quantity++;
-    else cart.push({ id: p.id, name: p.name, price: Math.round(p.price - p.price*(p.discount||0)/100), quantity: 1, courierCharge: p.courierCharge||0, isB2B: false });
+    if(item) {
+        if(p.stockQty !== null && p.stockQty !== undefined && item.quantity >= p.stockQty) {
+            showToast('⚠️ Only ' + p.stockQty + ' units available!', '#ff9800'); return;
+        }
+        item.quantity++;
+    } else cart.push({ id: p.id, name: p.name, price: Math.round(p.price - p.price*(p.discount||0)/100), quantity: 1, courierCharge: p.courierCharge||0, isB2B: false });
     saveCart(); updateCartCount(); renderCart();
 }
 function removeFromCart(id, cartKey) {
@@ -6151,7 +6253,7 @@ async function checkout() {
 }
 
 // ==================== UPI PAY MODAL ====================
-function openUPIPayModal() {
+async function openUPIPayModal() {
     // ✅ FIX 1: Cart empty check pehle karo
     if(cart.length === 0) { showToast('❌ Cart is empty! Please add items first.', '#ff4444'); return; }
     // ✅ FIX 2: Login check — bina login ke UPI modal nahi khulegа
@@ -6173,7 +6275,7 @@ function openUPIPayModal() {
     let upiId = settings.upiId || '43459091963@sbi';
     let companyName = encodeURIComponent(settings.companyName || 'Nexdrop Solutions');
 
-    // Update modal
+    // Update modal text fields
     document.getElementById('upiModalAmount').textContent = '₹' + total;
     document.getElementById('upiIdDisplay').textContent = upiId;
 
@@ -6189,17 +6291,31 @@ function openUPIPayModal() {
         if (el && val) el.textContent = val;
     });
 
-    // QR generate karo — settings se custom ya in-browser canvas
-    let qrImg = document.getElementById('upiQRImg');
-    let qrFallback = document.getElementById('upiQRFallback');
-    let upiLink = 'upi://pay?pa=' + encodeURIComponent(upiId) + '&pn=' + companyName + '&am=' + total + '&cu=INR';
-    setQRCode(qrImg, qrFallback, upiLink, upiId);
-
-    // Store total for direct UPI link
+    // Store totals
     window._upiTotal = total;
     window._upiId = upiId;
+
+    // ✅ Modal pehle open karo (loading state show hoga)
+    const _loadingEl = document.getElementById('upiQRLoading');
+    const _imgEl = document.getElementById('upiQRImg');
+    const _divEl = document.getElementById('upiQRDiv');
+    const _fbEl = document.getElementById('upiQRFallback');
+    if(_loadingEl) _loadingEl.style.display = 'flex';
+    if(_imgEl) _imgEl.style.display = 'none';
+    if(_divEl) _divEl.style.display = 'none';
+    if(_fbEl) _fbEl.style.display = 'none';
     document.getElementById('upiPayModal').style.display = 'block';
     document.body.style.overflow = 'hidden';
+
+    // ✅ QR FIX: Har baar Supabase se fresh fetch karo
+    if(!settings.qrCodeImage) {
+        const { data: _qr } = await db.from('settings').select('value').eq('key','nexdrop_qr_code').maybeSingle();
+        if(_qr && _qr.value) settings.qrCodeImage = _qr.value;
+    }
+
+    // QR show karo
+    let upiLink = 'upi://pay?pa=' + encodeURIComponent(upiId) + '&pn=' + companyName + '&am=' + total + '&cu=INR';
+    setQRCode(_imgEl, _fbEl, upiLink, upiId);
 }
 
 function closeUPIPayModal(e) {
@@ -6239,89 +6355,60 @@ function sendPaymentScreenshotWhatsApp() {
     window.open('https://wa.me/' + waNo + '?text=' + encodeURIComponent(msg), '_blank');
     return false;
 }
-// ==================== INLINE QR GENERATOR (No CDN, No External API) ====================
-// Minimal QR Code generator — pure JS, works offline, file:// aur https:// dono pe
-// Based on QR Code Model 2, supports alphanumeric + byte mode for UPI strings
+// ==================== REAL QR CODE GENERATOR ====================
 function generateQRDataURL(text, size) {
-    size = size || 200;
-    try {
-        // Use canvas + qr-lite algorithm via data URI approach
-        // Fallback: render text-based placeholder if canvas unavailable
-        const canvas = document.createElement('canvas');
-        canvas.width = size; canvas.height = size;
-        const ctx = canvas.getContext('2d');
-
-        // Simple visual placeholder with UPI text — real QR via encoding below
-        // Full QR encoding (Reed-Solomon) is 500+ lines; use reliable approach:
-        // Encode as SVG QR using built-in browser capabilities via BlobURL
-        // For production UPI QR, we use the settings-uploaded QR image as primary
-        // This fallback generates a styled placeholder with UPI ID visible
-        const upiId = (window._upiId || (window.settings && window.settings.upiId) || '43459091963@sbi');
-
-        // Draw styled QR placeholder
-        ctx.fillStyle = '#ffffff';
-        ctx.fillRect(0, 0, size, size);
-
-        // Border
-        ctx.strokeStyle = '#1565c0';
-        ctx.lineWidth = 4;
-        ctx.strokeRect(4, 4, size-8, size-8);
-
-        // Corner squares (QR finder pattern style)
-        const drawFinder = (x, y) => {
-            ctx.fillStyle = '#1565c0';
-            ctx.fillRect(x, y, 28, 28);
-            ctx.fillStyle = '#ffffff';
-            ctx.fillRect(x+4, y+4, 20, 20);
-            ctx.fillStyle = '#1565c0';
-            ctx.fillRect(x+8, y+8, 12, 12);
-        };
-        drawFinder(12, 12);
-        drawFinder(size-40, 12);
-        drawFinder(12, size-40);
-
-        // UPI Icon
-        ctx.fillStyle = '#1565c0';
-        ctx.font = 'bold ' + Math.round(size*0.18) + 'px sans-serif';
-        ctx.textAlign = 'center';
-        ctx.fillText('UPI', size/2, size/2 - 8);
-
-        // UPI ID text
-        ctx.fillStyle = '#333';
-        ctx.font = Math.round(size*0.07) + 'px monospace';
-        const maxLen = 22;
-        const displayId = upiId.length > maxLen ? upiId.substring(0, maxLen-2) + '..' : upiId;
-        ctx.fillText(displayId, size/2, size/2 + 16);
-
-        // Scan instruction
-        ctx.fillStyle = '#888';
-        ctx.font = Math.round(size*0.065) + 'px sans-serif';
-        ctx.fillText('Scan via GPay/PhonePe', size/2, size - 20);
-
-        return canvas.toDataURL('image/png');
-    } catch(e) {
-        return null;
-    }
+    // Legacy fallback — ab setQRCode direct use karo
+    return null;
 }
 
 function setQRCode(imgEl, fallbackEl, upiLink, upiId) {
-    // Priority 1: Settings mein custom QR uploaded hai → wahi use karo
+    const qrDiv = document.getElementById('upiQRDiv');
+    const qrLoading = document.getElementById('upiQRLoading');
+
+    // Helper: hide loading
+    function hideLoading() { if(qrLoading) qrLoading.style.display = 'none'; }
+
+    // Priority 1: Admin ne custom QR image upload ki hai → wahi use karo
     if(window.settings && window.settings.qrCodeImage) {
-        imgEl.src = window.settings.qrCodeImage;
-        imgEl.style.display = 'block';
+        hideLoading();
+        if(imgEl) {
+            imgEl.src = window.settings.qrCodeImage;
+            imgEl.style.display = 'block';
+        }
+        if(qrDiv) qrDiv.style.display = 'none';
         if(fallbackEl) fallbackEl.style.display = 'none';
         return;
     }
-    // Priority 2: In-browser canvas QR generate karo — no external API
-    const dataUrl = generateQRDataURL(upiId || upiLink, 200);
-    if(dataUrl) {
-        imgEl.src = dataUrl;
-        imgEl.style.display = 'block';
+
+    // Priority 2: qrcode.js se real scannable UPI QR banao
+    if(typeof QRCode !== 'undefined' && qrDiv) {
+        qrDiv.innerHTML = '';
+        hideLoading();
+        qrDiv.style.display = 'flex';
+        if(imgEl) imgEl.style.display = 'none';
         if(fallbackEl) fallbackEl.style.display = 'none';
-    } else {
-        imgEl.style.display = 'none';
-        if(fallbackEl) fallbackEl.style.display = 'flex';
+
+        try {
+            new QRCode(qrDiv, {
+                text: upiLink,
+                width: 196,
+                height: 196,
+                colorDark: '#000000',
+                colorLight: '#ffffff',
+                correctLevel: QRCode.CorrectLevel.M
+            });
+        } catch(e) {
+            if(qrDiv) qrDiv.style.display = 'none';
+            if(fallbackEl) fallbackEl.style.display = 'flex';
+        }
+        return;
     }
+
+    // Priority 3: Library load nahi hui — fallback show karo
+    hideLoading();
+    if(qrDiv) qrDiv.style.display = 'none';
+    if(imgEl) imgEl.style.display = 'none';
+    if(fallbackEl) fallbackEl.style.display = 'flex';
 }
 // ==================== END UPI PAY MODAL ====================
 
@@ -6679,14 +6766,23 @@ async function doForgotPassword() {
     // 🔒 FIX: Hash karke Supabase mein save karo — localStorage mein password nahi
     let hashedNew = await hashPassword(newPass);
 
-    // Supabase update
+    // ✅ FIX: upsert use karo (update ki jagah) — "record new has no field updated_at" error avoid karne ke liye
+    // Supabase triggers kabhi kabhi updated_at inject karte hain — upsert se yeh bypass hota hai
     try {
-        await db.from('users').update({ password: hashedNew }).eq('email', email);
+        const { error: updateError } = await db.from('users')
+            .upsert({ email: email, password: hashedNew }, { onConflict: 'email', ignoreDuplicates: false });
+        if(updateError) {
+            setMsg('❌ Password update failed: ' + updateError.message, '#ff4444');
+            return;
+        }
     } catch(e) {
         setMsg('❌ Password update failed. Please try again.', '#ff4444');
-        /* [security log removed] */;
         return;
     }
+
+    // ✅ In-memory users array bhi sync karo (same session mein login ke liye)
+    let memIdx = (users || []).findIndex(u => (u.email||'').toLowerCase() === email);
+    if(memIdx >= 0) { users[memIdx].password = hashedNew; }
 
     // ✅ FIX 6: Success — fields clear karo aur login par bhejo
     setMsg('✅ Password successfully reset! You can now login.', '#2c5a4a');
@@ -6758,7 +6854,7 @@ async function checkUserEmail() {
         // Migrate plaintext → hashed silently
         if (verified && userData.password && !userData.password.startsWith('sha256:')) {
             hashPassword(pass).then(h => {
-                db.from('users').update({ password: h }).eq('email', email).catch(() => {});
+                db.from('users').upsert({ email: email, password: h }, { onConflict: 'email', ignoreDuplicates: false }).catch(() => {});
             });
         }
     } catch(e) {
@@ -6786,6 +6882,7 @@ async function checkUserEmail() {
     if(idx >= 0) users[idx] = user; else users.push(user);
 
     currentUser = user; saveCurrentUser();
+    sbLoadUserCart(); // ✅ FIX v38: Login ke baad Supabase se cart restore karo
     document.getElementById('userAuthTabs').style.display = 'none';
     document.getElementById('userLoginForm').style.display = 'none';
     document.getElementById('userDashboard').style.display = 'block';
@@ -6802,7 +6899,7 @@ function autoFillRegState() {
     }
 }
 
-function userRegister() {
+async function userRegister() {
     let email = document.getElementById('regEmail2') ? document.getElementById('regEmail2').value.trim() : document.getElementById('userEmail').value.trim();
     let name = document.getElementById('regName').value.trim();
     let phone = document.getElementById('regPhone').value.trim();
@@ -6820,31 +6917,43 @@ function userRegister() {
     if(!/[A-Z]/.test(pass)) { showToast('❌ Password mein kam se kam 1 Capital letter hona chahiye!', '#ff4444'); return; }
     if(!/[0-9]/.test(pass)) { showToast('❌ Password mein kam se kam 1 Number hona chahiye!', '#ff4444'); return; }
     if(!/[!@#$%^&*]/.test(pass)) { showToast('❌ Password mein kam se kam 1 Special character (!@#$%^&*) hona chahiye!', '#ff4444'); return; }
-    // Email duplicate check
-    let existing = users.find(u => u.email === email);
+    // Email duplicate check — in-memory + Supabase both
+    let existing = users.find(u => (u.email||'').toLowerCase() === email);
     if(existing) { showToast('❌ Yeh email already registered hai! Please log in.', '#ff4444'); showLoginForm(); return; }
     // Phone duplicate check
     let phoneClean = phone.replace(/\D/g,'');
     let phoneExisting = users.find(u => u.phone && u.phone.replace(/\D/g,'') === phoneClean);
     if(phoneExisting) { showToast('❌ This mobile number is already registered! Please use a different number.', '#ff4444'); return; }
+
+    // ✅ BUG FIX: Supabase se bhi verify karo (in-memory array stale ho sakta hai fresh page load pe)
+    showToast('⏳ Checking availability...', '#888');
+    try {
+        const { data: sbExist } = await db.from('users').select('email,phone').or('email.eq.' + email + ',phone.eq.' + phoneClean).maybeSingle();
+        if(sbExist) {
+            if((sbExist.email||'').toLowerCase() === email) { showToast('❌ Yeh email already registered hai! Please log in.', '#ff4444'); showLoginForm(); return; }
+            if((sbExist.phone||'').replace(/\D/g,'').slice(-10) === phoneClean.slice(-10)) { showToast('❌ This mobile number is already registered!', '#ff4444'); return; }
+        }
+    } catch(e) { /* offline fallback — in-memory check pe depend karo */ }
     // 🔒 FIX #4: newUser object mein plaintext password NAHI — _newPassword flag use karo
     let newUser = { name, email, phone, address, gstin, stateCode, orders: [], loyaltyPoints: 0, registeredAt: new Date().toISOString() };
     // _newPassword is a transient flag — sbSaveUser reads it, hashes it, then deletes it
     newUser._newPassword = pass;
-    users.push(newUser); currentUser = newUser;
-    saveCurrentUser(); updateStats();
-    // sbSaveUser will hash _newPassword and save to Supabase
+
+    // ✅ BUG FIX: Show loading, wait for Supabase save before showing dashboard
+    showToast('⏳ Creating account...', '#888');
     sbSaveUser(newUser).then(() => {
-        // After save, ensure no password artifacts remain in localStorage
-        const storableUsers = users.map(u => { const { password, _newPassword, ...safe } = u; return safe; });
-        /* users saved via Supabase */
         saveCurrentUser();
+        users.push(newUser); currentUser = newUser;
+        sbLoadUserCart(); // ✅ FIX v38: Register ke baad bhi cart check karo (returning user)
+        updateStats();
+        document.getElementById('userAuthTabs').style.display = 'none';
+        document.getElementById('userRegForm').style.display = 'none';
+        document.getElementById('userDashboard').style.display = 'block';
+        loadDashboard();
+        showToast('✅ Account ban gaya! Welcome ' + esc(name) + '!');
+    }).catch(() => {
+        showToast('❌ Account creation failed! Internet check karein aur dobara try karein.', '#ff4444');
     });
-    document.getElementById('userAuthTabs').style.display = 'none';
-    document.getElementById('userRegForm').style.display = 'none';
-    document.getElementById('userDashboard').style.display = 'block';
-    loadDashboard();
-    showToast('✅ Account ban gaya! Welcome ' + name + '!');
 }
 function userLogin() { checkUserEmail(); }
 function showUserOrders() {
@@ -6877,7 +6986,9 @@ function saveUserPassword() {
             if (!ok) { showUserPassMsg('❌ Current password is incorrect!', '#ff4444'); return; }
             hashPassword(newPass).then(async hashedNew => {
                 try {
-                    await db.from('users').update({ password: hashedNew }).eq('email', currentUser.email);
+                    const { error: upErr } = await db.from('users')
+                        .upsert({ email: currentUser.email, password: hashedNew }, { onConflict: 'email', ignoreDuplicates: false });
+                    if(upErr) { showUserPassMsg('❌ Password update failed: ' + upErr.message, '#ff4444'); return; }
                     // memory/localStorage mein password NAHI rakhna
                     showUserPassMsg('✅ Password successfully changed!', '#2c5a4a');
                     document.getElementById('userOldPass').value = '';
@@ -6904,6 +7015,34 @@ function showUserPassMsg(text, color) {
 function loadDashboard() {
     // 🔒 FIX #5: esc() se XSS protect karo — user input direct innerHTML mein nahi
     document.getElementById('userInfo').innerHTML = `<p>👤 <strong>${esc(currentUser.name)}</strong></p><p>✉️ ${esc(currentUser.email)}</p><p>📞 ${esc(currentUser.phone)}</p><p>📍 ${esc(currentUser.address)}</p>${currentUser.gstin ? `<p style="font-size:0.78rem;color:#7b1fa2;">🏢 GSTIN: <strong>${esc(currentUser.gstin)}</strong>${currentUser.stateCode ? ' &nbsp;|&nbsp; State Code: <strong>' + esc(currentUser.stateCode) + '</strong>' : ''}</p>` : ''}`;
+
+
+    // 🛒 Cart items user panel mein dikhao
+    let cartSection = document.getElementById('userCartSection');
+    let cartItemsEl = document.getElementById('userCartItems');
+    let cartTotalEl = document.getElementById('userCartTotal');
+    if(cartSection) {
+        if(cart && cart.length > 0) {
+            cartSection.style.display = 'block';
+            let cartHtml = '';
+            let subtotal = 0;
+            cart.forEach(function(item) {
+                let lineTotal = item.price * item.quantity;
+                subtotal += lineTotal;
+                cartHtml += '<div style="display:flex;justify-content:space-between;align-items:center;padding:0.35rem 0;border-bottom:1px solid #f5e6d0;">' +
+                    '<div style="flex:1;min-width:0;">' +
+                    '<div style="font-weight:600;font-size:0.8rem;color:#2c5a4a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + esc(item.name) + (item.isB2B ? ' <span style="font-size:0.65rem;background:#e8f5e9;color:#2c5a4a;padding:1px 5px;border-radius:4px;">W</span>' : '') + '</div>' +
+                    '<div style="font-size:0.7rem;color:#888;">Qty: ' + item.quantity + ' × ₹' + item.price + '</div>' +
+                    '</div>' +
+                    '<strong style="color:#c49a6c;font-size:0.82rem;margin-left:0.5rem;">₹' + lineTotal + '</strong>' +
+                    '</div>';
+            });
+            if(cartItemsEl) cartItemsEl.innerHTML = cartHtml;
+            if(cartTotalEl) cartTotalEl.innerHTML = 'Total: ₹' + subtotal + ' &nbsp;<span style="font-size:0.7rem;color:#888;font-weight:400;">(' + cart.reduce(function(s,i){return s+i.quantity;},0) + ' items)</span>';
+        } else {
+            cartSection.style.display = 'none';
+        }
+    }
     let userOrders = orders.filter(o => o.userId === currentUser.email);
     let totalSpent = userOrders.filter(o=>o.status!=='Cancelled').reduce((s,o)=>{ let t=typeof o.total==='number'?o.total:parseInt(String(o.total).replace(/[₹,]/g,''))||0; return s+t; },0);
     let delivered = userOrders.filter(o=>o.status==='Delivered').length;
@@ -7038,8 +7177,8 @@ async function loadUserBills() {
                (o.customerName && o.customerName === currentUser.name);
     });
 
-    // localStorage bills bhi check karo (agar same device hai)
-    let allBills = bl ? JSON.parse(bl) : [];
+    // In-memory bills array use karo (bl stale localStorage ref tha — removed)
+    let allBills = Array.isArray(bills) ? bills : [];
 
     if(userOrders.length === 0 && allBills.length === 0) {
         el.innerHTML = '<div style="text-align:center;color:#999;padding:0.5rem;font-size:0.78rem;">No orders yet</div>';
@@ -7066,7 +7205,7 @@ async function loadUserBills() {
                 <div style="font-size:0.7rem;color:#888;">${b.date||''}</div>
                 <div style="font-size:0.75rem;"><span style="color:${statusColor};font-weight:600;">${o.status||''}</span> · ₹${b.total}</div>
             </div>
-            <button onclick="openBillModal(${b.orderId})" style="background:#2c5a4a;color:white;border:none;padding:0.35rem 0.7rem;border-radius:8px;font-size:0.7rem;cursor:pointer;font-weight:600;">🧾 View</button>
+            <button onclick="openBillModal('${b.orderId}')" style="background:#2c5a4a;color:white;border:none;padding:0.35rem 0.7rem;border-radius:8px;font-size:0.7rem;cursor:pointer;font-weight:600;">🧾 View</button>
         </div>`;
     });
 
@@ -7084,7 +7223,7 @@ async function loadUserBills() {
                 <div style="font-size:0.7rem;color:#888;">${dateStr}</div>
                 <div style="font-size:0.75rem;"><span style="color:${statusColor};font-weight:600;">${o.status||'Pending'}</span> · ₹${o.total}</div>
             </div>
-            <button onclick="openBillModal(${o.id})" style="background:#c49a6c;color:white;border:none;padding:0.35rem 0.7rem;border-radius:8px;font-size:0.7rem;cursor:pointer;font-weight:600;flex-shrink:0;">🧾 Bill</button>
+            <button onclick="openBillModal('${o.id}')" style="background:#c49a6c;color:white;border:none;padding:0.35rem 0.7rem;border-radius:8px;font-size:0.7rem;cursor:pointer;font-weight:600;flex-shrink:0;">🧾 Bill</button>
         </div>`;
     });
 
@@ -8248,6 +8387,8 @@ function removeCompanyLogo() {
 function removeQRCode() {
     // ✅ QR removal — non-destructive, no confirm needed
     delete settings.qrCodeImage;
+    // ✅ FIX v38: Supabase se bhi delete karo
+    db.from('settings').delete().eq('key', 'nexdrop_qr_code').then(function(r){ if(r && r.error) console.log('QR delete failed:', r.error.message); });
     saveSettingsData();
     loadSettingsForm();
     showToast('🗑️ QR code removed', '#ff9800');
@@ -8294,6 +8435,11 @@ function savePaymentSettings() {
         let reader = new FileReader();
         reader.onload = function(e) {
             settings.qrCodeImage = e.target.result;
+            // ✅ FIX v38: QR code alag Supabase key mein save karo — nexdrop_settings size issue avoid
+            db.from('settings').upsert(
+                { key: 'nexdrop_qr_code', value: e.target.result },
+                { onConflict: 'key' }
+            ).then(function(r){ if(r && r.error) console.log('QR save failed:', r.error.message); });
             saveSettingsData();
             loadSettingsForm();
             showToast('✅ Payment settings + QR saved!', '#2c5a4a');
@@ -8494,6 +8640,11 @@ function switchTab(tab) {
     if(tab==="reports") { loadReports(); setTimeout(loadPnLStatement, 200); }
     if(tab==="settings") loadSettingsForm();
     if(tab==="sellers") loadSellersTab();
+    // ✅ FIX v38: Ye tabs pehle sirf DOMContentLoaded patch mein the — ab directly yahan hain (reliable)
+    if(tab==="coupons") setTimeout(loadCouponsList, 100);
+    if(tab==="analytics") setTimeout(function(){ loadAnalytics(7); }, 100);
+    if(tab==="reviews") setTimeout(loadAdminReviews, 100);
+    if(tab==="khata") setTimeout(function(){ if(typeof khataLoadSummary==='function') khataLoadSummary(); if(typeof khataLoadDropdown==='function') khataLoadDropdown(); }, 100);
 }
 // ── SELLERS MANAGEMENT (Supabase) ──
 let _sellersCache = [];
@@ -8637,17 +8788,20 @@ async function addNewSeller() {
 // ============================================================
 let currentSeller = null;
 
-// Brute force guard (same pattern as distLoginGuard)
+// Brute force guard (same pattern as _adminLoginGuard and _distLoginGuard)
 const _sellerLoginGuard = (function() {
-    const KEY = 'slg_f';
-    const MAX = 5, LOCK_MS = 5 * 60 * 1000;
-    function getFails() { try { return JSON.parse(localStorage.getItem(KEY) || '{"count":0,"ts":0}'); } catch(e) { return {count:0,ts:0}; } }
-    function save(obj) { try { localStorage.setItem(KEY, JSON.stringify(obj)); } catch(e) {} }
+    const STORE_FAILS = 'slg_f';
+    const STORE_LOCK  = 'slg_l';
+    const MAX_FAILS = 5, LOCK_MS = 5 * 60 * 1000;
     return {
-        isLocked() { const f=getFails(); return f.count >= MAX && (Date.now()-f.ts) < LOCK_MS; },
-        secondsLeft() { const f=getFails(); return Math.ceil((LOCK_MS-(Date.now()-f.ts))/1000); },
-        recordFail() { const f=getFails(); save({count:f.count+1,ts:Date.now()}); },
-        reset() { save({count:0,ts:0}); }
+        isLocked() { const until = parseInt(sessionStorage.getItem(STORE_LOCK) || '0', 10); return Date.now() < until; },
+        secondsLeft() { const until = parseInt(sessionStorage.getItem(STORE_LOCK) || '0', 10); return Math.ceil((until - Date.now()) / 1000); },
+        recordFail() {
+            let fails = parseInt(sessionStorage.getItem(STORE_FAILS) || '0', 10) + 1;
+            if(fails >= MAX_FAILS) { sessionStorage.setItem(STORE_LOCK, String(Date.now() + LOCK_MS)); sessionStorage.setItem(STORE_FAILS, '0'); }
+            else { sessionStorage.setItem(STORE_FAILS, String(fails)); }
+        },
+        reset() { sessionStorage.removeItem(STORE_FAILS); sessionStorage.removeItem(STORE_LOCK); }
     };
 })();
 
@@ -9484,7 +9638,7 @@ function generateBillData(o) {
         gstAmt += Math.round((itemTotal / (1 + slab/100)) * (slab/100) * 100) / 100;
     }
     gstAmt = Math.round(gstAmt * 100) / 100;
-    // ── Unique Bill Number: sequential counter (localStorage + Supabase sync) ──
+    // ── Unique Bill Number: sequential counter (in-memory _billCounter + Supabase fire-and-forget sync) ──
     let existingBill = bills.find(b => b.orderId === o.id || b.orderId == o.id);
     let billNo;
     if(existingBill && existingBill.billNo) {
@@ -10408,8 +10562,7 @@ function importReplaceData() {
 
 // ---- PAGE INIT: Load data and display home products on page load ----
 document.addEventListener('DOMContentLoaded', function() {
-    localStorage.removeItem('nexdrop_cart'); // Purana cart clear karo
-    loadCart();
+    loadCart(); // ✅ FIX: Cart localStorage se load karo (clear nahi karo)
     updateCartCount();
     // Show b2bProducts immediately (hardcoded) while Supabase loads retail products
     if(typeof displayHomeProducts === 'function') displayHomeProducts();
@@ -13406,7 +13559,8 @@ function setReviewStar(n) {
 function openUserReview(productName) {
     let sec = document.getElementById('userReviewSection');
     let pnEl = document.getElementById('reviewProductName');
-    if(!sec || !currentUser) { showToast('❌ Please log in first!','#ff4444'); return; }
+    if(!currentUser) { showToast('❌ Please login first!','#ff4444'); openUserPanel(); return; }
+    if(!sec) return;
     if(pnEl) pnEl.textContent = productName;
     _reviewStar = 0;
     document.querySelectorAll('#reviewStars span').forEach(el=>el.classList.remove('active'));
@@ -13415,7 +13569,7 @@ function openUserReview(productName) {
     sec.scrollIntoView({behavior:'smooth',block:'nearest'});
 }
 function submitUserReview() {
-    if(!currentUser) { showToast('❌ Please log in!','#ff4444'); return; }
+    if(!currentUser) { showToast('❌ Please login first!','#ff4444'); openUserPanel(); return; }
     if(_reviewStar === 0) { showToast('⭐ Please select a star rating!','#ff9800'); return; }
     let productName = document.getElementById('reviewProductName')?.textContent || '';
     let reviewText = document.getElementById('reviewText')?.value?.trim() || '';
@@ -13565,13 +13719,13 @@ function pdmSetStar(n) {
 }
 
 function pdmOpenWriteReview() {
-    if(!currentUser) { showToast('❌ Pehle login karein!', '#ff4444'); return; }
+    if(!currentUser) { document.getElementById('productDetailModal').style.display='none'; showToast('❌ Pehle login karein!', '#ff4444'); openUserPanel(); return; }
     let form = document.getElementById('pdm_writeReviewForm');
     if(form) { form.style.display = form.style.display === 'none' ? 'block' : 'none'; }
 }
 
 function pdmSubmitReview() {
-    if(!currentUser) { showToast('❌ Pehle login karein!', '#ff4444'); return; }
+    if(!currentUser) { document.getElementById('productDetailModal').style.display='none'; showToast('❌ Pehle login karein!', '#ff4444'); openUserPanel(); return; }
     if(_pdmStar === 0) { showToast('⭐ Star rating select karein!', '#ff9800'); return; }
     let text = (document.getElementById('pdm_reviewText')?.value||'').trim();
     if(text.length < 10) { showToast('✍️ Thoda aur likhein (min 10 chars)!', '#ff9800'); return; }
@@ -13957,19 +14111,8 @@ document.addEventListener('DOMContentLoaded', function() {
         observer.observe(aboutEl);
     })();
 
-    // Patch switchTab to also trigger new tab loads
-    var _realSwitchTab = window.switchTab;
-    if(_realSwitchTab) {
-        window.switchTab = function(name) {
-            _realSwitchTab(name);
-            if(name === 'coupons') setTimeout(loadCouponsList, 100);
-            if(name === 'analytics') setTimeout(function(){ loadAnalytics(7); }, 100);
-            if(name === 'reviews') setTimeout(loadAdminReviews, 100);
-            if(name === 'reports') setTimeout(function(){ loadPnLStatement(); }, 150);
-            if(name === 'gst') setTimeout(function(){ gstPopulateYears(); gstSetPeriodMode(_gstPeriodMode || 'monthly'); }, 100);
-            if(name === 'khata') setTimeout(function(){ if(typeof khataLoadSummary==='function') khataLoadSummary(); if(typeof khataLoadDropdown==='function') khataLoadDropdown(); }, 100);
-        };
-    }
+    // ✅ FIX v38: switchTab patch removed — sab tab loads directly main switchTab() mein moved
+    // (coupons, analytics, reviews, khata, gst, reports — sab reliable ab)
     // Update notif bell when admin panel opens
     var adminPanelEl = document.getElementById('adminPanel');
     if(adminPanelEl) {

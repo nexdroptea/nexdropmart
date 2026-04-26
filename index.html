@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- 🔒 SECURITY PATCH v2.9 applied | v36.18.4-upi-checkout — UPI Flow Fix: (1) UPI button ab sab products ke liye dikhta hai (sirf codAllowed===false tak limited nahi); (2) UPI modal mein "Maine Pay Kar Diya — Order Place Karo" button add kiya; (3) upiCheckout() function — paymentMethod=UPI, paymentStatus=PAID se order place karta hai + WhatsApp message; (4) UPI button label updated | v36.18.3-upi-fix below -->
+<!-- 🔒 SECURITY PATCH v2.9 applied | v36.18.5 — Fix: (1) Search bar autocomplete=off — browser address suggestions band; (2) openUPIDirect: window.open → location.href — mobile pe UPI app directly khulega + 2s fallback toast | v36.18.4-upi-checkout below -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <!-- 🔒 FIX #6: X-Content-Type-Options prevents MIME sniffing attacks -->
@@ -2157,7 +2157,7 @@ body.dark-mode .nav-links { background: #121a18 !important; }
     <p class="section-sub">Premium FMCG & Grocery Products — Direct from Bihar's Best Farms 🌾</p>
     <!-- ✅ Product Search Box -->
     <div class="product-search-wrap">
-        <input type="text" id="homeProductSearch" class="product-search-input" placeholder="🔍 Search makhana, tea &amp; more..." oninput="searchHomeProducts(this.value)" aria-label="Search products">
+        <input type="text" id="homeProductSearch" class="product-search-input" placeholder="🔍 Search makhana, tea &amp; more..." oninput="searchHomeProducts(this.value)" aria-label="Search products" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
     </div>
     <div id="hpTabsContainer" style="display:flex;gap:0.5rem;flex-wrap:wrap;margin-bottom:1.2rem;justify-content:center;">
         <button id="hpTab_all" class="hp-tab hp-tab-active" onclick="filterHomeProducts('all')">🛍️ All Products</button>
@@ -6260,7 +6260,17 @@ function openUPIDirect() {
     let total = window._upiTotal || 0;
     let companyName = settings.companyName || 'Nexdrop Solutions';
     let upiLink = 'upi://pay?pa=' + encodeURIComponent(upiId) + '&pn=' + encodeURIComponent(companyName) + '&am=' + total + '&cu=INR';
-    window.open(upiLink, '_blank');
+    // 🔒 FIX: window.open UPI link block hota hai mobile browsers mein
+    // location.href use karo — directly UPI app open hoga
+    try {
+        location.href = upiLink;
+        // Agar 2 seconds mein kuch nahi hua toh fallback toast dikhao
+        setTimeout(function() {
+            showToast('💡 App nahi khula? UPI ID copy karein aur manually pay karein.', '#1565c0');
+        }, 2000);
+    } catch(e) {
+        showToast('💡 UPI ID copy karein: ' + upiId, '#1565c0');
+    }
     return false;
 }
 

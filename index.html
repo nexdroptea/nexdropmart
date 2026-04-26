@@ -1418,13 +1418,18 @@ function _stripPasswords(usersArr) {
     .admin-btn::after { display: none !important; }
 
     .user-btn {
-        background: #f5f0ea; color: #2c5a4a !important;
-        padding: 0.35rem 0.9rem; border-radius: 30px;
-        font-size: 0.78rem; font-weight: 600; text-decoration: none;
-        transition: all 0.3s; white-space: nowrap; cursor: pointer;
+        background: #2c5a4a; color: white !important;
+        width: 38px; height: 38px; border-radius: 50%;
+        font-size: 1.1rem; font-weight: 700; text-decoration: none;
+        transition: all 0.3s; cursor: pointer;
+        display: inline-flex; align-items: center; justify-content: center;
+        overflow: hidden; padding: 0; flex-shrink: 0;
+        box-shadow: 0 2px 8px rgba(44,90,74,0.3);
+        border: 2px solid #c49a6c;
     }
     .user-btn::after { display: none !important; }
-    .user-btn:hover { background: #2c5a4a; color: white !important; }
+    .user-btn:hover { background: #1e3f34; transform: scale(1.05); }
+    .user-btn img { width: 100%; height: 100%; object-fit: cover; border-radius: 50%; }
 
     .menu-icon {
         display: none; font-size: 1.5rem; cursor: pointer;
@@ -1725,7 +1730,8 @@ img { max-width: 100%; height: auto; }
     .nav-container { flex-wrap: nowrap; }
     .nav-links { gap: 1.2rem; }
     .nav-links a { font-size: 0.82rem; }
-    .admin-btn, .user-btn { font-size: 0.75rem; padding: 0.3rem 0.75rem; }
+    .admin-btn { font-size: 0.75rem; padding: 0.3rem 0.75rem; }
+    .user-btn { width: 38px !important; height: 38px !important; padding: 0 !important; font-size: 1.05rem !important; }
     .logo-text { font-size: 1.05rem; }
 }
 
@@ -1733,7 +1739,8 @@ img { max-width: 100%; height: auto; }
 @media (min-width: 769px) and (max-width: 1024px) {
     .navbar { padding: 0.7rem 1rem; }
     .nav-links a { font-size: 0.8rem; }
-    .admin-btn, .user-btn { font-size: 0.72rem; padding: 0.28rem 0.6rem; }
+    .admin-btn { font-size: 0.72rem; padding: 0.28rem 0.6rem; }
+    .user-btn { width: 38px !important; height: 38px !important; padding: 0 !important; }
 }
 
 /* --- MOBILE NAVBAR FIX --- */
@@ -1755,7 +1762,7 @@ img { max-width: 100%; height: auto; }
     }
     .nav-right { gap: 0.4rem; }
     .admin-btn { padding: 0.3rem 0.65rem; font-size: 0.72rem; }
-    .user-btn  { padding: 0.3rem 0.65rem; font-size: 0.72rem; }
+    .user-btn  { width: 38px !important; height: 38px !important; padding: 0 !important; font-size: 1.05rem !important; }
 }
 
 /* --- HERO SECTION --- */
@@ -2067,7 +2074,7 @@ body.dark-mode .nav-links { background: #121a18 !important; }
         </div>
         <div class="nav-right">
             <!-- Admin button removed from public view — use Ctrl+Shift+A to access -->
-            <a href="#" class="user-btn" onclick="openUserPanel(); return false;">👤</a>
+            <a href="#" class="user-btn" id="navUserBtn" onclick="openUserPanel(); return false;" title="My Account"><span id="navUserBtnInner">👤</span></a>
             <button class="menu-icon" onclick="toggleNav()" id="menuBtn">☰</button>
         </div>
     </div>
@@ -2523,11 +2530,7 @@ body.dark-mode .nav-links { background: #121a18 !important; }
         </div>
       </div>
 
-      <!-- Direct UPI Pay Button -->
-      <a id="upiDirectLink" href="#" onclick="return openUPIDirect()" style="display:block;text-align:center;background:linear-gradient(135deg,#1565c0,#0d47a1);color:white;padding:0.8rem;border-radius:12px;font-weight:800;font-size:0.95rem;text-decoration:none;margin-bottom:0.7rem;">
-        🚀 Open UPI App Directly
-      </a>
-      <div style="font-size:0.68rem;color:#888;text-align:center;margin-bottom:0.8rem;">Tap on mobile — opens your UPI payment app directly</div>
+
 
       <!-- Bank Details -->
       <div style="background:#f9f6f2;border-radius:10px;padding:0.7rem;font-size:0.72rem;color:#555;border:1px solid #e0d8d0;margin-bottom:0.8rem;">
@@ -2546,10 +2549,10 @@ body.dark-mode .nav-links { background: #121a18 !important; }
       </div>
 
       <!-- Place Order after UPI payment -->
-      <button id="upiPlaceOrderBtn" onclick="upiCheckout()" style="width:100%;margin-top:0.8rem;background:linear-gradient(135deg,#2e7d32,#1b5e20);color:white;border:none;padding:0.9rem;border-radius:14px;font-weight:800;font-size:1rem;cursor:pointer;letter-spacing:0.3px;display:none;">
+      <button id="upiPlaceOrderBtn" onclick="upiCheckout()" style="width:100%;margin-top:0.8rem;background:linear-gradient(135deg,#2e7d32,#1b5e20);color:white;border:none;padding:0.9rem;border-radius:14px;font-weight:800;font-size:1rem;cursor:pointer;letter-spacing:0.3px;display:block;">
         ✅ I Have Paid — Place My Order
       </button>
-      <div id="upiPlaceOrderHint" style="font-size:0.65rem;color:#888;text-align:center;margin-top:4px;display:none;">Your order will be placed + WhatsApp confirmation will be sent</div>
+      <div id="upiPlaceOrderHint" style="font-size:0.65rem;color:#888;text-align:center;margin-top:4px;display:block;">Your order will be placed + WhatsApp confirmation will be sent</div>
     </div>
   </div>
 </div>
@@ -3147,7 +3150,27 @@ body.dark-mode .nav-links { background: #121a18 !important; }
 <div id="bulkModal" class="modal"><div class="modal-content"><h3>🏭 Bulk Enquiry</h3><input type="text" id="bulkName" placeholder="Your Name"><input type="tel" id="bulkPhone" placeholder="Mobile Number"><input type="text" id="bulkProduct" placeholder="Product Type"><input type="text" id="bulkQuantity" placeholder="Quantity"><textarea id="bulkMessage" rows="3" placeholder="Requirements"></textarea><button onclick="sendBulkEnquiry()">Send Enquiry</button><button onclick="closeBulkModal()">Cancel</button></div></div>
 
 <!-- Admin Login -->
-<div id="adminLoginModal" class="modal"><div class="modal-content"><h3>🔐 Admin Login</h3><input type="text" id="adminUser" placeholder="Username"><input type="password" id="adminPass" placeholder="Password"><button onclick="adminLogin()">Login</button><button onclick="closeAdminLogin()">Close</button></div></div>
+<div id="adminLoginModal" class="modal"><div class="modal-content">
+  <h3>🔐 Admin Login</h3>
+  <div id="adminLoginForm">
+    <input type="text" id="adminUser" placeholder="Username">
+    <input type="password" id="adminPass" placeholder="Password">
+    <button onclick="adminLogin()">Login</button>
+    <div style="text-align:center;margin-top:0.4rem;">
+      <span onclick="showAdminForgot()" style="font-size:0.78rem;color:#c49a6c;cursor:pointer;text-decoration:underline;">🔑 Forgot Password?</span>
+    </div>
+    <button onclick="closeAdminLogin()" style="background:#f5f0ea;color:#2c5a4a;margin-top:0.3rem;">Close</button>
+  </div>
+  <div id="adminForgotForm" style="display:none;">
+    <p style="font-size:0.82rem;color:#6b5e4a;margin-bottom:0.5rem;">🔐 Admin Password Reset — Enter the secret recovery key set in your Supabase settings.</p>
+    <input type="text" id="adminForgotKey" placeholder="Recovery Key *" style="margin-bottom:0.5rem;">
+    <input type="password" id="adminForgotNewPass" placeholder="New Password *" style="margin-bottom:0.5rem;">
+    <input type="password" id="adminForgotConfPass" placeholder="Confirm New Password *" style="margin-bottom:0.5rem;">
+    <div id="adminForgotMsg" style="font-size:0.78rem;color:#c62828;min-height:1.2rem;margin-bottom:0.4rem;"></div>
+    <button onclick="doAdminForgotPassword()">🔒 Reset Password</button>
+    <button onclick="showAdminLoginForm()" style="background:#f5f0ea;color:#2c5a4a;margin-top:0.3rem;">← Back to Login</button>
+  </div>
+</div></div>
 
 <!-- Product Detail Modal -->
 <div id="productDetailModal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.82);z-index:2500;overflow-y:auto;padding:0.8rem;" onclick="closeProductModal(event)">
@@ -4860,7 +4883,7 @@ body.dark-mode .nav-links { background: #121a18 !important; }
       <h4 style="margin-bottom:0.5rem;color:#1565c0;">📥 Data Import — Restore Backup</h4>
       <p style="font-size:0.78rem;color:#6b5e4a;margin-bottom:0.8rem;">Select the previously exported JSON backup file.</p>
       <div style="margin-bottom:0.6rem;">
-        <label style="font-size:0.78rem;font-weight:600;color:#6b5e4a;">📁 JSON Backup File Select Karo:</label>
+        <label style="font-size:0.78rem;font-weight:600;color:#6b5e4a;">📁 Select JSON Backup File:</label>
         <input type="file" id="importFileInput" accept=".json" onchange="previewImport(event)" style="width:100%;padding:0.4rem;border:1px solid #90caf9;border-radius:8px;margin-top:0.3rem;font-size:0.78rem;background:white;">
       </div>
       <div id="importPreview" style="display:none;background:white;border-radius:10px;padding:0.7rem;margin-bottom:0.6rem;font-size:0.75rem;border:1px solid #90caf9;">
@@ -5438,7 +5461,7 @@ function buildRetailCard(p) {
     <div class="price"><span class="current-price">₹${Math.round(discPrice)}${p.priceUnit?'<span style="font-size:0.7rem;font-weight:500;color:#6b5e4a;">/'+safePriceUnit+'</span>':''}</span>${p.discount>0?' <span style="font-size:0.9rem;color:#999;margin:0 4px;">-</span> <span class="original-price" style="font-size:0.85rem;text-decoration:line-through;">₹'+p.price+'</span> <span style="font-size:0.65rem;background:#2c5a4a;color:white;padding:1px 6px;border-radius:10px;margin-left:2px;">'+p.discount+'% OFF</span>':''}</div>
     ${stockBadge}
     <div style="display:flex;gap:0.3rem;margin-top:0.6rem;">
-      <button class="add-to-cart" onclick="event.stopPropagation();addToCart(${p.id});showToast('✅ Added to cart!','#2c5a4a');" style="flex:1;background:#2c5a4a;font-size:0.75rem;padding:0.55rem 0.4rem;">🛒 Add to Cart</button>
+      <button class="add-to-cart" onclick="event.stopPropagation();if(addToCart(${p.id}))showToast('✅ Added to cart!','#2c5a4a');" style="flex:1;background:#2c5a4a;font-size:0.75rem;padding:0.55rem 0.4rem;">🛒 Add to Cart</button>
     </div>
     <button class="product-details-toggle" onclick="event.stopPropagation();this.nextElementSibling.classList.toggle('open');this.textContent=this.nextElementSibling.classList.contains('open')?'▲ Hide Details':'▼ View Details'">▼ View Details</button>
     <div class="product-hidden-details">
@@ -5760,8 +5783,7 @@ function openProductModal(type, id) {
             cartBtn.style.cursor = 'not-allowed';
             cartBtn.innerText = '❌ Out of Stock';
         }
-        waBtn.onclick = function() { buyNow(p.id); };
-        // UPI Pay button — ONLY for non-COD (codAllowed===false) products
+        waBtn.onclick = function() { if(!currentUser) { openUserPanel(); return; } buyNow(p.id); };
         let upiWrap = document.getElementById('pdm_upiWrap');
         let upiBtn = document.getElementById('pdm_upiBtn');
         if(p.inStock && p.codAllowed === false && upiWrap && upiBtn) {
@@ -5771,7 +5793,7 @@ function openProductModal(type, id) {
             let total = discPrice + courier;
             upiBtn.onclick = function() {
                 // ✅ FIX: Login check — UPI modal will not open without a valid login
-                if(!currentUser) { showToast('❌ Please login first!', '#ff4444'); openUserPanel(); return; }
+                if(!currentUser) { openUserPanel(); return; }
                 window._upiTotal = total;
                 window._upiId = settings.upiId || '43459091963@sbi';
                 let upiId = window._upiId;
@@ -5798,6 +5820,9 @@ function openProductModal(type, id) {
                 document.getElementById('upiIdDisplay').textContent = upiId;
                 document.getElementById('upiPayModal').style.display = 'block';
                 document.body.style.overflow = 'hidden';
+                // Show 'I Have Paid' button immediately
+                var _b = document.getElementById('upiPlaceOrderBtn'); if(_b) _b.style.display = 'block';
+                var _h = document.getElementById('upiPlaceOrderHint'); if(_h) _h.style.display = 'block';
             };
         } else if(upiWrap) {
             upiWrap.style.display = 'none';
@@ -5923,9 +5948,8 @@ function renderExtraImgPreview(type, id) {
 function addToCart(id, type) {
     // 🔒 FIX: Login check — items cannot be added to cart without a valid login
     if(!currentUser) {
-        showToast('❌ Please log in first!', '#ff4444');
         openUserPanel();
-        return;
+        return false;
     }
     // Support both retail and b2b/wholesale products
     let p = null, isB2B = false;
@@ -5936,7 +5960,7 @@ function addToCart(id, type) {
         p = products.find(p => p.id === id);
         if(!p) { p = b2bProducts.find(p => p.id === id); if(p) isB2B = true; }
     }
-    if(!p || !p.inStock) return;
+    if(!p || !p.inStock) return false;
     // B2B: only allow if price is numeric
     if(isB2B) {
         let numPrice = parseFloat(String(p.price).replace(/[^0-9.]/g,''));
@@ -5945,7 +5969,7 @@ function addToCart(id, type) {
             let waNo = (window.settings && window.settings.whatsappNo) ? window.settings.whatsappNo : '919006606697';
             let msg = '🏭 *Wholesale Enquiry — Nexdrop Mart*\n\nProduct: *'+p.name+'*\nCategory: '+p.category+'\nMin Order: '+p.minQty+'\n\nPlease share current pricing and availability.';
             window.open('https://wa.me/'+waNo+'?text='+encodeURIComponent(msg),'_blank');
-            return;
+            return false;
         }
         let discPrice = Math.round(numPrice - numPrice*(p.discount||0)/100);
         // Use a negative id namespace for b2b to avoid collision with retail ids
@@ -5953,13 +5977,14 @@ function addToCart(id, type) {
         let item = cart.find(i => i.cartKey === cartKey);
         if(item) item.quantity++;
         else cart.push({ id: id, cartKey: cartKey, name: p.name, price: discPrice, quantity: 1, courierCharge: 0, isB2B: true, orderType: 'wholesale' });
-        saveCart(); updateCartCount(); renderCart(); openCartInDashboard(); return;
+        saveCart(); updateCartCount(); renderCart(); openCartInDashboard(); return true;
     }
     // Retail
     let item = cart.find(i => i.id === id && !i.isB2B);
     if(item) item.quantity++;
     else cart.push({ id: p.id, name: p.name, price: Math.round(p.price - p.price*(p.discount||0)/100), quantity: 1, courierCharge: p.courierCharge||0, isB2B: false });
     saveCart(); updateCartCount(); renderCart(); openCartInDashboard();
+    return true;
 }
 function removeFromCart(id, cartKey) {
     if(cartKey) cart = cart.filter(i => i.cartKey !== cartKey);
@@ -6089,7 +6114,7 @@ function toggleCart() {
 }
 async function checkout() {
     if(cart.length === 0) { showToast('❌ Your cart is empty! Please add items first.', '#ff4444'); return; }
-    if(!currentUser) { showToast('❌ Please login first!', '#ff4444'); openUserPanel(); return; }
+    if(!currentUser) { openUserPanel(); return; }
     let subtotal = cart.reduce((s,i) => s + i.price * i.quantity, 0);
     let maxCourier = cart.length > 0 ? Math.max(...cart.map(i => i.courierCharge||0)) : 0; // ✅ FIX: empty cart -Infinity guard
     // Apply coupon discount
@@ -6147,19 +6172,9 @@ async function checkout() {
 // ==================== UPI CHECKOUT ====================
 async function upiCheckout() {
     if(cart.length === 0) { showToast('❌ Cart is empty!', '#ff4444'); return; }
-    if(!currentUser) { showToast('❌ Please log in first!', '#ff4444'); openUserPanel(); return; }
+    if(!currentUser) { openUserPanel(); return; }
 
-    // ✅ FIX: Confirm payment was actually successful before placing order
-    const confirmed = confirm('Payment Confirmation\n\nHas your UPI payment been SUCCESSFULLY completed?\n\n  OK = Yes, payment was successful\n  Cancel = No, payment failed');
-    if(!confirmed) {
-        showToast('⚠️ Order cancelled. Please complete the payment and try again.', '#e67e22');
-        return;
-    }
-
-    // Close the UPI payment modal
-    document.getElementById('upiPayModal').style.display = 'none';
-    document.body.style.overflow = '';
-
+    // ✅ FIX: Calculate total first, then ask user to confirm the exact amount paid
     let subtotal = cart.reduce((s,i) => s + i.price * i.quantity, 0);
     let maxCourier = cart.length ? Math.max(...cart.map(i => i.courierCharge||0)) : 0;
     let couponDiscount = 0;
@@ -6171,6 +6186,42 @@ async function upiCheckout() {
     let courier = (subtotal >= (settings.freeMin||999) || isFreeShipping) ? 0 : maxCourier;
     let total = subtotal - couponDiscount + courier;
     if(total < 0) total = 0;
+
+    // ✅ FIX #PAID-VERIFY: Ask user to enter the amount they paid — must match order total
+    const enteredAmt = prompt(
+        '💳 Payment Verification\n\n' +
+        'Your order total is: ₹' + total + '\n\n' +
+        'Please enter the EXACT amount you paid via UPI\n(this helps us verify your payment):',
+        ''
+    );
+    if(enteredAmt === null) {
+        showToast('⚠️ Order cancelled.', '#e67e22');
+        return;
+    }
+    const parsedAmt = parseFloat(String(enteredAmt).replace(/[^0-9.]/g,''));
+    if(isNaN(parsedAmt) || parsedAmt <= 0) {
+        showToast('❌ Invalid amount entered. Please enter the amount you paid.', '#ff4444');
+        return;
+    }
+    if(Math.abs(parsedAmt - total) > 1) {
+        const forceConfirm = confirm(
+            '⚠️ Amount Mismatch!\n\n' +
+            'Order Total: ₹' + total + '\n' +
+            'Amount You Entered: ₹' + parsedAmt + '\n\n' +
+            'The amounts don\'t match. Are you sure you paid ₹' + parsedAmt + '?\n\n' +
+            'OK = Yes, continue anyway\nCancel = Go back and check'
+        );
+        if(!forceConfirm) {
+            showToast('⚠️ Please verify your payment and try again.', '#e67e22');
+            return;
+        }
+    }
+
+    // Close the UPI payment modal
+    document.getElementById('upiPayModal').style.display = 'none';
+    document.body.style.overflow = '';
+
+    // subtotal, maxCourier, couponDiscount, isFreeShipping, courier, total already calculated above
 
     let orderId = genOrderId();
     let hasWholesale = cart.some(i => i.isB2B);
@@ -6198,7 +6249,8 @@ async function upiCheckout() {
         discountAmount: couponDiscount || 0,
         customerGstin: (currentUser && currentUser.gstin) ? currentUser.gstin : '',
         customerStateCode: (currentUser && currentUser.stateCode) ? currentUser.stateCode : '',
-        customerStateName: (currentUser && currentUser.stateName) ? currentUser.stateName : ''
+        customerStateName: (currentUser && currentUser.stateName) ? currentUser.stateName : '',
+        upiAmountEntered: parsedAmt || total
     };
 
     orders.unshift(order);
@@ -6215,7 +6267,8 @@ async function upiCheckout() {
     // WhatsApp message
     let itemLines = cart.map(i => (i.isB2B?'[W] ':'')+i.name + ' x ' + i.quantity + ' = ₹' + (i.price * i.quantity)).join('\n');
     let couponLine = couponDiscount > 0 ? '\nCoupon Discount: -₹' + couponDiscount : (isFreeShipping ? '\nCoupon: Free Shipping' : '');
-    let message = '*' + (settings.companyName||'Nexdrop Mart') + ' - New Order #' + orderId + '*\n💳 UPI Payment\n\n*Customer Details:*\nName: ' + currentUser.name + '\nPhone: ' + currentUser.phone + '\nAddress: ' + currentUser.address + '\n\n*Order Items:*\n' + itemLines + '\n\nSubtotal: ₹' + subtotal + couponLine + '\nCourier: ' + (courier === 0 ? 'FREE' : '₹'+courier) + '\n*Total: ₹' + total + '*\n\n✅ Payment: UPI (Customer ne payment confirm ki)\nDate: ' + new Date().toLocaleString();
+    let amtMatchNote = Math.abs((parsedAmt||0) - total) > 1 ? '\n⚠️ Amount Mismatch! Customer entered: ₹'+parsedAmt+' (Order: ₹'+total+')' : '\n✅ Amount Verified: ₹'+parsedAmt;
+    let message = '*' + (settings.companyName||'Nexdrop Mart') + ' - New Order #' + orderId + '*\n💳 UPI Payment\n\n*Customer Details:*\nName: ' + currentUser.name + '\nPhone: ' + currentUser.phone + '\nAddress: ' + currentUser.address + '\n\n*Order Items:*\n' + itemLines + '\n\nSubtotal: ₹' + subtotal + couponLine + '\nCourier: ' + (courier === 0 ? 'FREE' : '₹'+courier) + '\n*Total: ₹' + total + '*' + amtMatchNote + '\nDate: ' + new Date().toLocaleString();
 
     cart = []; saveCart(); updateCartCount(); renderCart(); toggleCart();
     showToast('✅ Order #' + orderId + ' placed! Sending WhatsApp confirmation...', '#2c5a4a');
@@ -6228,7 +6281,7 @@ function openUPIPayModal() {
     // ✅ FIX 1: Validate that cart is not empty first
     if(cart.length === 0) { showToast('❌ Cart is empty! Please add items first.', '#ff4444'); return; }
     // ✅ FIX 2: Login check — UPI modal will not open without a valid login
-    if(!currentUser) { showToast('❌ Please login first!', '#ff4444'); openUserPanel(); return; }
+    if(!currentUser) { openUserPanel(); return; }
 
     // Calculate current cart total
     let subtotal = cart.reduce((s,i) => s + i.price * i.quantity, 0);
@@ -6282,11 +6335,16 @@ function openUPIPayModal() {
     // Store total for direct UPI link
     window._upiTotal = total;
     window._upiId = upiId;
+    // Show "I Have Paid" button immediately (no Open UPI App button needed)
+    var _pb = document.getElementById('upiPlaceOrderBtn');
+    var _ph = document.getElementById('upiPlaceOrderHint');
+    if(_pb) _pb.style.display = 'block';
+    if(_ph) _ph.style.display = 'block';
     document.getElementById('upiPayModal').style.display = 'block';
     document.body.style.overflow = 'hidden';
 }
 
-// ✅ Helper: Show the "I Have Paid" button only after the user has attempted payment
+// Helper: Show the "I Have Paid" button (kept for backward compatibility)
 function _showUPIPlaceOrderBtn() {
     var btn = document.getElementById('upiPlaceOrderBtn');
     var hint = document.getElementById('upiPlaceOrderHint');
@@ -6298,11 +6356,11 @@ function closeUPIPayModal(e) {
     if(e && e.target !== document.getElementById('upiPayModal')) return;
     document.getElementById('upiPayModal').style.display = 'none';
     document.body.style.overflow = '';
-    // 🔒 FIX: Reset the button state when the modal is closed
+    // Reset button state (will re-show on next open)
     var btn = document.getElementById('upiPlaceOrderBtn');
     var hint = document.getElementById('upiPlaceOrderHint');
-    if(btn) btn.style.display = 'none';
-    if(hint) hint.style.display = 'none';
+    if(btn) btn.style.display = 'block';
+    if(hint) hint.style.display = 'block';
 }
 
 function openUPIDirect() {
@@ -6815,31 +6873,71 @@ function userRegister() {
     if(!/[A-Z]/.test(pass)) { showToast('❌ Password must contain at least 1 uppercase letter!', '#ff4444'); return; }
     if(!/[0-9]/.test(pass)) { showToast('❌ Password must contain at least 1 number!', '#ff4444'); return; }
     if(!/[!@#$%^&*]/.test(pass)) { showToast('❌ Password must contain at least 1 special character (!@#$%^&*)!', '#ff4444'); return; }
-    // Email duplicate check
-    let existing = users.find(u => u.email === email);
-    if(existing) { showToast('❌ This email is already registered! Please log in.', '#ff4444'); showLoginForm(); return; }
-    // Phone duplicate check
+
+    // ✅ FIX #SIGNUP-DEDUP: Supabase real-time duplicate check (email + phone)
     let phoneClean = phone.replace(/\D/g,'');
-    let phoneExisting = users.find(u => u.phone && u.phone.replace(/\D/g,'') === phoneClean);
-    if(phoneExisting) { showToast('❌ This mobile number is already registered! Please use a different number.', '#ff4444'); return; }
-    // 🔒 FIX #4: Do not store plaintext password in newUser object — use the _newPassword flag
-    let newUser = { name, email, phone, address, gstin, stateCode, orders: [], loyaltyPoints: 0, registeredAt: new Date().toISOString() };
-    // _newPassword is a transient flag — sbSaveUser reads it, hashes it, then deletes it
-    newUser._newPassword = pass;
-    users.push(newUser); currentUser = newUser;
-    saveCurrentUser(); updateStats();
-    // sbSaveUser will hash _newPassword and save to Supabase
-    sbSaveUser(newUser).then(() => {
-        // After save, ensure no password artifacts remain in localStorage
-        const storableUsers = users.map(u => { const { password, _newPassword, ...safe } = u; return safe; });
-        /* users saved via Supabase */
-        saveCurrentUser();
+    // Disable register button to prevent double-submit
+    let regBtn = document.querySelector('#userRegForm button[onclick*="userRegister"]');
+    if(regBtn) { regBtn.disabled = true; regBtn.textContent = '⏳ Checking...'; }
+
+    Promise.all([
+        db.from('users').select('email').eq('email', email).limit(1),
+        db.from('users').select('phone').like('phone', '%'+phoneClean.slice(-10)+'%').limit(1)
+    ]).then(([emailRes, phoneRes]) => {
+        if(regBtn) { regBtn.disabled = false; regBtn.textContent = '✅ Create Account'; }
+
+        // Email duplicate — Supabase check
+        if(emailRes.data && emailRes.data.length > 0) {
+            showToast('❌ This email is already registered! Please log in.', '#ff4444');
+            showLoginForm(); return;
+        }
+        // Phone duplicate — Supabase check
+        if(phoneRes.data && phoneRes.data.length > 0) {
+            showToast('❌ This mobile number is already registered! Please use a different number.', '#ff4444'); return;
+        }
+        // Local array fallback check (offline safety net)
+        let existingLocal = users.find(u => u.email === email);
+        if(existingLocal) { showToast('❌ This email is already registered! Please log in.', '#ff4444'); showLoginForm(); return; }
+        let phoneLocalExisting = users.find(u => u.phone && u.phone.replace(/\D/g,'') === phoneClean);
+        if(phoneLocalExisting) { showToast('❌ This mobile number is already registered!', '#ff4444'); return; }
+
+        // ✅ All checks passed — proceed with registration
+        // 🔒 FIX #4: Do not store plaintext password in newUser object — use the _newPassword flag
+        let newUser = { name, email, phone, address, gstin, stateCode, orders: [], loyaltyPoints: 0, registeredAt: new Date().toISOString() };
+        // _newPassword is a transient flag — sbSaveUser reads it, hashes it, then deletes it
+        newUser._newPassword = pass;
+        users.push(newUser); currentUser = newUser;
+        saveCurrentUser(); updateStats();
+        // sbSaveUser will hash _newPassword and save to Supabase
+        sbSaveUser(newUser).then(() => {
+            // After save, ensure no password artifacts remain in localStorage
+            const storableUsers = users.map(u => { const { password, _newPassword, ...safe } = u; return safe; });
+            /* users saved via Supabase */
+            saveCurrentUser();
+        });
+        document.getElementById('userAuthTabs').style.display = 'none';
+        document.getElementById('userRegForm').style.display = 'none';
+        document.getElementById('userDashboard').style.display = 'block';
+        loadDashboard();
+        showToast('✅ Account created! Welcome ' + name + '!');
+    }).catch(() => {
+        // Network error — fallback to local check only
+        if(regBtn) { regBtn.disabled = false; regBtn.textContent = '✅ Create Account'; }
+        let existing = users.find(u => u.email === email);
+        if(existing) { showToast('❌ This email is already registered! Please log in.', '#ff4444'); showLoginForm(); return; }
+        let phoneExisting = users.find(u => u.phone && u.phone.replace(/\D/g,'') === phoneClean);
+        if(phoneExisting) { showToast('❌ This mobile number is already registered!', '#ff4444'); return; }
+        let newUser = { name, email, phone, address, gstin, stateCode, orders: [], loyaltyPoints: 0, registeredAt: new Date().toISOString() };
+        newUser._newPassword = pass;
+        users.push(newUser); currentUser = newUser;
+        saveCurrentUser(); updateStats();
+        sbSaveUser(newUser).then(() => { saveCurrentUser(); });
+        document.getElementById('userAuthTabs').style.display = 'none';
+        document.getElementById('userRegForm').style.display = 'none';
+        document.getElementById('userDashboard').style.display = 'block';
+        loadDashboard();
+        showToast('✅ Account created! Welcome ' + name + '!');
     });
-    document.getElementById('userAuthTabs').style.display = 'none';
-    document.getElementById('userRegForm').style.display = 'none';
-    document.getElementById('userDashboard').style.display = 'block';
-    loadDashboard();
-    showToast('✅ Account created! Welcome ' + name + '!');
 }
 function userLogin() { checkUserEmail(); }
 function showUserOrders() {
@@ -6897,6 +6995,9 @@ function showUserPassMsg(text, color) {
     setTimeout(() => { el.style.display = 'none'; }, 4000);
 }
 function loadDashboard() {
+    // ✅ Update navbar user circle with first letter of name
+    let navInner = document.getElementById("navUserBtnInner");
+    if(navInner && currentUser && currentUser.name) { navInner.textContent = currentUser.name.trim().charAt(0).toUpperCase(); navInner.style.fontSize = "1.05rem"; navInner.style.fontWeight = "800"; }
     // 🔒 FIX #5: Protect against XSS with esc() — user input must not be set as innerHTML directly
     document.getElementById('userInfo').innerHTML = `<p>👤 <strong>${esc(currentUser.name)}</strong></p><p>✉️ ${esc(currentUser.email)}</p><p>📞 ${esc(currentUser.phone)}</p><p>📍 ${esc(currentUser.address)}</p>${currentUser.gstin ? `<p style="font-size:0.78rem;color:#7b1fa2;">🏢 GSTIN: <strong>${esc(currentUser.gstin)}</strong>${currentUser.stateCode ? ' &nbsp;|&nbsp; State Code: <strong>' + esc(currentUser.stateCode) + '</strong>' : ''}</p>` : ''}`;
     let userOrders = orders.filter(o => o.userId === currentUser.email);
@@ -6933,7 +7034,7 @@ function loadDashboard() {
     }
     document.getElementById('userOrders').innerHTML = ordersHtml || '<p style="text-align:center;color:#999;font-size:0.85rem;padding:1rem;">No orders yet</p>';
 }
-function userLogout() { currentUser = null; saveCurrentUser(); closeUserPanel(); location.reload(); }
+function userLogout() { currentUser = null; saveCurrentUser(); let ni = document.getElementById('navUserBtnInner'); if(ni) ni.textContent = '👤'; closeUserPanel(); location.reload(); }
 function openEditProfile() {
     if(!currentUser) return;
     document.getElementById('editName').value = currentUser.name || '';
@@ -7099,8 +7200,35 @@ function saveCurrentUser() {
     }
 }
 
-function openAdminLogin() { document.getElementById('adminLoginModal').classList.add('active'); }
+function openAdminLogin() { showAdminLoginForm(); document.getElementById('adminLoginModal').classList.add('active'); }
 function closeAdminLogin() { document.getElementById('adminLoginModal').classList.remove('active'); }
+function showAdminForgot() { document.getElementById('adminLoginForm').style.display='none'; document.getElementById('adminForgotForm').style.display='block'; document.getElementById('adminForgotMsg').textContent=''; }
+function showAdminLoginForm() { document.getElementById('adminLoginForm').style.display='block'; document.getElementById('adminForgotForm').style.display='none'; }
+async function doAdminForgotPassword() {
+    let key = (document.getElementById('adminForgotKey').value||'').trim();
+    let newP = document.getElementById('adminForgotNewPass').value;
+    let conP = document.getElementById('adminForgotConfPass').value;
+    let msgEl = document.getElementById('adminForgotMsg');
+    msgEl.style.color='#c62828';
+    if(!key) { msgEl.textContent='⚠️ Recovery key required!'; return; }
+    if(!newP || newP.length < 6) { msgEl.textContent='⚠️ Password must be at least 6 characters!'; return; }
+    if(newP !== conP) { msgEl.textContent='❌ Passwords do not match!'; return; }
+    try {
+        // Verify recovery key from Supabase settings
+        const { data: recData, error: recErr } = await db.from('settings').select('value').eq('key','admin_recovery_key').single();
+        if(recErr || !recData) { msgEl.textContent='❌ Recovery key not configured in settings!'; return; }
+        let storedKey = typeof recData.value === 'string' ? recData.value : (recData.value?.key || '');
+        if(storedKey.trim() !== key) { msgEl.textContent='❌ Invalid recovery key!'; return; }
+        // Fetch current admin creds to keep username intact
+        const { data: credData } = await db.from('settings').select('value').eq('key','admin_credentials').single();
+        let creds = credData && credData.value ? (typeof credData.value==='string'?JSON.parse(credData.value):credData.value) : {};
+        let hashed = await hashPassword(newP);
+        await db.from('settings').update({ value: JSON.stringify({ username: creds.username||'admin', password: hashed }) }).eq('key','admin_credentials');
+        msgEl.style.color='#2c5a4a';
+        msgEl.textContent='✅ Password reset successful! Please login with new password.';
+        setTimeout(()=>{ ['adminForgotKey','adminForgotNewPass','adminForgotConfPass'].forEach(id=>{ let e=document.getElementById(id); if(e) e.value=''; }); showAdminLoginForm(); }, 2000);
+    } catch(e) { msgEl.textContent='⚠️ Error connecting to server. Try again.'; }
+}
 // 🔒 Brute force protection — max 5 attempts, 30s cooldown
 const _adminLoginGuard = (function() {
     // 🔒 FIX: Persist to sessionStorage so lockout state survives a page refresh
@@ -7777,13 +7905,29 @@ function loadAdminOrders() {
             <td><textarea onchange="saveOrderNote(${o.id},this.value)" style="width:110px;height:50px;font-size:0.65rem;border:1px solid #ddd;border-radius:6px;padding:3px;resize:none;" placeholder="Notes...">${esc(o.adminNote||'')}</textarea></td>
             <td style="font-size:0.65rem;color:#888;white-space:nowrap;">${esc(o.date||'')}</td>
             <td style="white-space:nowrap;">
+                ${o.paymentStatus === 'Pending Verification' ? '<div style="background:#fff3e0;color:#e65100;font-size:0.58rem;font-weight:700;padding:2px 5px;border-radius:4px;margin-bottom:3px;text-align:center;border:1px solid #ff9800;">⏳ UPI Unverified</div>' : (o.paymentStatus === 'PAID' ? '<div style="background:#e8f5e9;color:#2e7d32;font-size:0.58rem;font-weight:700;padding:2px 5px;border-radius:4px;margin-bottom:3px;text-align:center;border:1px solid #4caf50;">✅ PAID</div>' : '')}
                 <button onclick="openBillModal(${o.id})" style="background:#2196f3;color:white;border:none;padding:0.25rem 0.5rem;border-radius:5px;cursor:pointer;font-size:0.62rem;margin-bottom:3px;display:block;width:100%;">🧾 Bill</button>
+                ${o.paymentStatus === 'Pending Verification' ? '<button onclick="quickVerifyPayment(' + o.id + ')" style="background:#ff9800;color:white;border:none;padding:0.25rem 0.5rem;border-radius:5px;cursor:pointer;font-size:0.62rem;margin-bottom:3px;display:block;width:100%;font-weight:700;">✅ Verify Pay</button>' : ''}
                 <button class="delete-btn" onclick="deleteOrder(${o.id})" style="width:100%;">Del</button>
             </td>
         </tr>`;
     }
     document.getElementById('adminOrdersList').innerHTML = html || '<tr><td colspan="8" style="text-align:center;color:#999;padding:1rem;">No orders found</td></tr>';
 }
+function quickVerifyPayment(id) {
+    // Quick payment verification from orders table — opens markBillPaid modal
+    if(!_adminVault.isLoggedIn()) { showToast('❌ Admin login required!', '#ff4444'); return; }
+    let o = orders.find(o => o.id === id);
+    if(!o) return;
+    // Open bill modal silently, then trigger markBillPaid
+    let origDisplay = document.getElementById('billModal') ? document.getElementById('billModal').style.display : 'none';
+    openBillModal(id);
+    // Auto-trigger the pay method selector
+    setTimeout(function() {
+        markBillPaid();
+    }, 300);
+}
+
 function updateStatus(id, status) {
     let o = orders.find(o => o.id === id);
     if(!o) return;
@@ -8727,7 +8871,7 @@ function displayHomeProducts() {
         // ✅ FIX: B2B/Wholesale shows Enquire only — no Add to Cart
         let actionBtn = isB2B
             ? `<button onclick="openProductModal('b2b',${p.id})" style="width:100%;background:linear-gradient(135deg,#2c5a4a,#1e3f34);color:white;border:none;padding:0.6rem;border-radius:40px;font-weight:600;font-size:0.88rem;cursor:pointer;margin-bottom:0.4rem;">📦 View & Enquire</button>`
-            : `<button onclick="addToCart(${p.id});showToast('✅ Added to cart!','#2c5a4a');" style="width:100%;background:#2c5a4a;color:white;border:none;padding:0.6rem;border-radius:40px;font-weight:600;font-size:0.88rem;cursor:pointer;margin-bottom:0.4rem;display:flex;align-items:center;justify-content:center;gap:0.4rem;">🛒 Add to Cart</button>`;
+            : `<button onclick="if(addToCart(${p.id}))showToast('✅ Added to cart!','#2c5a4a');" style="width:100%;background:#2c5a4a;color:white;border:none;padding:0.6rem;border-radius:40px;font-weight:600;font-size:0.88rem;cursor:pointer;margin-bottom:0.4rem;display:flex;align-items:center;justify-content:center;gap:0.4rem;">🛒 Add to Cart</button>`;
         html += `
         <div class="product-card" style="background:white;border-radius:16px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,0.07);border:1px solid #f0ebe4;position:relative;cursor:pointer;" onclick="openProductModal('${item.type}',${p.id})">
             ${badgeHtml}
@@ -9605,7 +9749,7 @@ function markBillPaid() {
         `<button onclick="_markBillPaidWith('${m}')" style="width:100%;background:#f0f7f4;color:#2c5a4a;border:1.5px solid #2c5a4a;padding:0.55rem;border-radius:10px;font-weight:600;font-size:0.88rem;cursor:pointer;margin-bottom:0.4rem;">${['💵','📱','🏦','💳','📄'][i]} ${m}</button>`
     ).join('');
     overlay.innerHTML = '<div style="background:white;border-radius:18px;padding:1.4rem 1.2rem;width:88%;max-width:320px;box-shadow:0 8px 32px rgba(0,0,0,0.22);">'
-        + '<div style="font-size:0.95rem;font-weight:700;color:#2c5a4a;margin-bottom:0.9rem;">💳 Payment Method Select Karo</div>'
+        + '<div style="font-size:0.95rem;font-weight:700;color:#2c5a4a;margin-bottom:0.9rem;">💳 Select Payment Method</div>'
         + btns
         + '<button onclick="document.getElementById(\'_payMethodModal\').remove()" style="width:100%;background:#eee;color:#333;border:none;padding:0.5rem;border-radius:10px;font-weight:600;font-size:0.85rem;cursor:pointer;margin-top:0.2rem;">Cancel</button>'
         + '</div>';
@@ -13220,7 +13364,7 @@ function setReviewStar(n) {
 function openUserReview(productName) {
     let sec = document.getElementById('userReviewSection');
     let pnEl = document.getElementById('reviewProductName');
-    if(!sec || !currentUser) { showToast('❌ Please log in first!','#ff4444'); return; }
+    if(!sec || !currentUser) { showToast('❌ Please log in first! Tap the account icon to sign in.','#ff4444'); return; }
     if(pnEl) pnEl.textContent = productName;
     _reviewStar = 0;
     document.querySelectorAll('#reviewStars span').forEach(el=>el.classList.remove('active'));
@@ -13379,13 +13523,13 @@ function pdmSetStar(n) {
 }
 
 function pdmOpenWriteReview() {
-    if(!currentUser) { showToast('❌ Please log in first!', '#ff4444'); return; }
+    if(!currentUser) { openUserPanel(); return; }
     let form = document.getElementById('pdm_writeReviewForm');
     if(form) { form.style.display = form.style.display === 'none' ? 'block' : 'none'; }
 }
 
 function pdmSubmitReview() {
-    if(!currentUser) { showToast('❌ Please log in first!', '#ff4444'); return; }
+    if(!currentUser) { openUserPanel(); return; }
     if(_pdmStar === 0) { showToast('⭐ Please select a star rating!', '#ff9800'); return; }
     let text = (document.getElementById('pdm_reviewText')?.value||'').trim();
     if(text.length < 10) { showToast('✍️ Please write a bit more (minimum 10 characters)!', '#ff9800'); return; }

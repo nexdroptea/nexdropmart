@@ -12106,6 +12106,17 @@ function safeSave(key, data) {
 }
 
 // ---- 7. DATA EXPORT FUNCTIONS ----
+// ✅ FIX: Mobile-compatible download helper (DOM append required on Android/iOS)
+function _triggerDownload(blob, filename) {
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.style.display = 'none';
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(function() { document.body.removeChild(a); URL.revokeObjectURL(url); }, 1000);
+}
 function exportAllData() {
     // 🔒 FIX Bug3: qrCodeImage (base64, 1-5MB) aur adminPassword export se exclude karo
     const { qrCodeImage, adminPassword, ...safeSettings } = settings;
@@ -12117,24 +12128,20 @@ function exportAllData() {
     let infoEl = document.getElementById('exportInfo');
     if(infoEl) { infoEl.style.display='block'; infoEl.textContent='✅ Export ready — ' + counts; }
     let blob = new Blob([JSON.stringify(exportObj, null, 2)], {type:'application/json'});
-    let a = document.createElement('a'); a.href = URL.createObjectURL(blob);
-    a.download = 'nexdrop_full_backup_' + new Date().toLocaleDateString('en-GB').replace(/\//g,'-') + '.json';
-    a.click();
-    showToast('✅ Full backup is downloading!', '#2c5a4a');
+    _triggerDownload(blob, 'nexdrop_full_backup_' + new Date().toLocaleDateString('en-GB').replace(/\//g,'-') + '.json');
+    showToast('✅ Full backup downloading — check Downloads folder!', '#2c5a4a');
 }
 function exportProductsOnly() {
     let obj = { version:'1.0', exportedAt: new Date().toISOString(), type:'products', data: { products, b2bProducts } };
     let blob = new Blob([JSON.stringify(obj, null, 2)], {type:'application/json'});
-    let a = document.createElement('a'); a.href = URL.createObjectURL(blob);
-    a.download = 'nexdrop_products_' + new Date().toLocaleDateString('en-GB').replace(/\//g,'-') + '.json'; a.click();
-    showToast('✅ Products JSON is exporting!', '#1565c0');
+    _triggerDownload(blob, 'nexdrop_products_' + new Date().toLocaleDateString('en-GB').replace(/\//g,'-') + '.json');
+    showToast('✅ Products JSON downloading — check Downloads folder!', '#1565c0');
 }
 function exportOrdersOnly() {
     let obj = { version:'1.0', exportedAt: new Date().toISOString(), type:'orders', data: { orders, bills } };
     let blob = new Blob([JSON.stringify(obj, null, 2)], {type:'application/json'});
-    let a = document.createElement('a'); a.href = URL.createObjectURL(blob);
-    a.download = 'nexdrop_orders_' + new Date().toLocaleDateString('en-GB').replace(/\//g,'-') + '.json'; a.click();
-    showToast('✅ Orders JSON is exporting!', '#ff9800');
+    _triggerDownload(blob, 'nexdrop_orders_' + new Date().toLocaleDateString('en-GB').replace(/\//g,'-') + '.json');
+    showToast('✅ Orders JSON downloading — check Downloads folder!', '#ff9800');
 }
 function exportUsersOnly() {
     // 🔒 FIX H3: Password hashes ko export se strip karo
@@ -12146,9 +12153,8 @@ function exportUsersOnly() {
     });
     let obj = { version:'1.0', exportedAt: new Date().toISOString(), type:'users', data: { users: safeUsers } };
     let blob = new Blob([JSON.stringify(obj, null, 2)], {type:'application/json'});
-    let a = document.createElement('a'); a.href = URL.createObjectURL(blob);
-    a.download = 'nexdrop_users_' + new Date().toLocaleDateString('en-GB').replace(/\//g,'-') + '.json'; a.click();
-    showToast('✅ Users JSON is exporting!', '#7b1fa2');
+    _triggerDownload(blob, 'nexdrop_users_' + new Date().toLocaleDateString('en-GB').replace(/\//g,'-') + '.json');
+    showToast('✅ Users JSON downloading — check Downloads folder!', '#7b1fa2');
 }
 
 // ---- 8. DATA IMPORT FUNCTIONS ----
@@ -12203,7 +12209,9 @@ function importMergeData() {
         // ✅ v40.1 FIX: safeSave('nexdrop_bills') → sbSaveBill per bill (bills TABLE mein save hoga, settings mein nahi)
         if(d.bills && Array.isArray(d.bills)) { d.bills.forEach(nb => { if(!bills.find(b => b.orderId === nb.orderId)) { bills.push(nb); sbSaveBill(nb); } }); }
         if(d.bulkEnquiries && Array.isArray(d.bulkEnquiries)) { d.bulkEnquiries.forEach(ne => { if(!bulkEnquiries.find(e => e.id === ne.id)) bulkEnquiries.push(ne); }); saveBulk(); }
-        updateStats(); loadAdminOrders(); loadAdminUsers();
+        updateStats(); loadAdminOrders(); loadAdminUsers(); loadAdminProducts(); displayProducts();
+        if(typeof displayHomeProducts==='function') displayHomeProducts();
+        if(typeof displayB2B==='function') displayB2B();
         if(msgEl) { msgEl.style.display='block'; msgEl.style.background='#e8f5e9'; msgEl.style.color='#2c5a4a'; msgEl.innerHTML='✅ Data merge ho gaya! Duplicates skip kiye.'; }
         showToast('✅ Data merged successfully!', '#2c5a4a');
     } catch(err) {

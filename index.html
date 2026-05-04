@@ -19375,6 +19375,377 @@ console.log('✅ [PATCH v39.2] ZERO localStorage: rls_dismissed→sessionStorage
 console.log('✅ [PATCH v39.0] 4 Admin Distributor features: Sub-tabs, Payment Verification, Support Ticket Management, Credit Limit + Manual Ledger');
 console.log('✅ [PATCH v38.0] 5 User Panel features added: Wishlist, Cancel/Return, Notifications, Coupon History, Download Bill');
 </script>
+
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<!-- 🌐 INDIAN LANGUAGE TRANSLATOR v2 — DOM-based, No widget needed -->
+<!-- MyMemory Free API + visible text node translation              -->
+<!-- ═══════════════════════════════════════════════════════════════ -->
+<style>
+#langTranslatorBtn {
+    position: fixed;
+    bottom: 80px;
+    right: 16px;
+    z-index: 99998;
+    width: 52px;
+    height: 52px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #ff6b35, #f7931e);
+    color: white;
+    border: none;
+    cursor: pointer;
+    font-size: 22px;
+    box-shadow: 0 4px 16px rgba(255,107,53,0.45);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: transform 0.2s, box-shadow 0.2s;
+    -webkit-tap-highlight-color: transparent;
+    user-select: none;
+}
+#langTranslatorBtn:hover { transform: scale(1.08); }
+#langTranslatorBtn .lang-pulse {
+    position: absolute;
+    width: 100%; height: 100%;
+    border-radius: 50%;
+    background: rgba(255,107,53,0.35);
+    animation: langPulse 2s infinite;
+    pointer-events: none;
+}
+@keyframes langPulse {
+    0%  { transform: scale(1);    opacity: 0.7; }
+    70% { transform: scale(1.55); opacity: 0; }
+    100%{ transform: scale(1.55); opacity: 0; }
+}
+#langPickerPanel {
+    position: fixed;
+    bottom: 145px;
+    right: 14px;
+    z-index: 99999;
+    background: #fff;
+    border-radius: 18px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+    padding: 14px 12px 10px;
+    width: 215px;
+    display: none;
+    animation: langSlideUp 0.22s ease;
+}
+@keyframes langSlideUp {
+    from { opacity: 0; transform: translateY(14px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+#langPickerPanel h4 {
+    margin: 0 0 10px;
+    font-size: 0.82rem;
+    color: #2c5a4a;
+    font-weight: 700;
+    text-align: center;
+}
+#langTranslatingOverlay {
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,0.38);
+    z-index: 999999;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    gap: 12px;
+    color: #fff;
+    font-size: 1rem;
+    font-weight: 600;
+}
+#langTranslatingOverlay .lt-spinner {
+    width: 42px; height: 42px;
+    border: 4px solid rgba(255,255,255,0.3);
+    border-top-color: #fff;
+    border-radius: 50%;
+    animation: ltSpin 0.8s linear infinite;
+}
+@keyframes ltSpin { to { transform: rotate(360deg); } }
+.lang-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+}
+.lang-btn {
+    border: 1.5px solid #e8e8e8;
+    border-radius: 10px;
+    padding: 7px 4px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    cursor: pointer;
+    background: #fafafa;
+    color: #333;
+    text-align: center;
+    transition: all 0.15s;
+    line-height: 1.3;
+}
+.lang-btn:hover  { background: #fff3ed; border-color: #ff6b35; color: #ff6b35; }
+.lang-btn.active { background: #ff6b35; border-color: #ff6b35; color: #fff; }
+.lang-btn .lang-native { display: block; font-size: 0.88rem; }
+.lang-btn .lang-eng    { display: block; font-size: 0.62rem; opacity: 0.72; }
+#langPickerPanel .lang-reset {
+    width: 100%;
+    margin-top: 8px;
+    padding: 7px;
+    border: none;
+    border-radius: 9px;
+    background: #f5f0ea;
+    color: #666;
+    font-size: 0.73rem;
+    cursor: pointer;
+    font-weight: 600;
+}
+#langPickerPanel .lang-reset:hover { background: #ffe0d0; color: #ff6b35; }
+#langPickerPanel .lang-note {
+    font-size: 0.6rem;
+    color: #aaa;
+    text-align: center;
+    margin-top: 6px;
+}
+</style>
+
+<!-- Loading overlay -->
+<div id="langTranslatingOverlay">
+    <div class="lt-spinner"></div>
+    <span id="langOverlayMsg">Translating…</span>
+</div>
+
+<!-- Floating Button -->
+<button id="langTranslatorBtn" onclick="toggleLangPicker()" title="भाषा बदलें" aria-label="Language Switcher">
+    <span class="lang-pulse"></span>
+    🌐
+</button>
+
+<!-- Language Picker -->
+<div id="langPickerPanel">
+    <h4>🌐 भाषा चुनें / Language</h4>
+    <div class="lang-grid">
+        <button class="lang-btn" onclick="translatePageTo('hi')" data-lang="hi"><span class="lang-native">हिन्दी</span><span class="lang-eng">Hindi</span></button>
+        <button class="lang-btn" onclick="translatePageTo('bn')" data-lang="bn"><span class="lang-native">বাংলা</span><span class="lang-eng">Bengali</span></button>
+        <button class="lang-btn" onclick="translatePageTo('te')" data-lang="te"><span class="lang-native">తెలుగు</span><span class="lang-eng">Telugu</span></button>
+        <button class="lang-btn" onclick="translatePageTo('mr')" data-lang="mr"><span class="lang-native">मराठी</span><span class="lang-eng">Marathi</span></button>
+        <button class="lang-btn" onclick="translatePageTo('ta')" data-lang="ta"><span class="lang-native">தமிழ்</span><span class="lang-eng">Tamil</span></button>
+        <button class="lang-btn" onclick="translatePageTo('gu')" data-lang="gu"><span class="lang-native">ગુજરાતી</span><span class="lang-eng">Gujarati</span></button>
+        <button class="lang-btn" onclick="translatePageTo('kn')" data-lang="kn"><span class="lang-native">ಕನ್ನಡ</span><span class="lang-eng">Kannada</span></button>
+        <button class="lang-btn" onclick="translatePageTo('pa')" data-lang="pa"><span class="lang-native">ਪੰਜਾਬੀ</span><span class="lang-eng">Punjabi</span></button>
+    </div>
+    <button class="lang-reset" onclick="resetPageLanguage()">↩ English (Default)</button>
+    <div class="lang-note">Powered by MyMemory API</div>
+</div>
+
+<script>
+(function() {
+'use strict';
+
+// ── CONFIG ──
+var LANG_NAMES = {hi:'हिन्दी',bn:'বাংলা',te:'తెలుగు',mr:'मराठी',ta:'தமிழ்',gu:'ગુજરાતી',kn:'ಕನ್ನಡ',pa:'ਪੰਜਾਬੀ'};
+var SKIP_TAGS  = {'SCRIPT':1,'STYLE':1,'NOSCRIPT':1,'IFRAME':1,'SVG':1,'PATH':1,'CANVAS':1,'INPUT':1,'TEXTAREA':1,'SELECT':1,'OPTION':1,'CODE':1,'PRE':1};
+var SKIP_IDS   = {'langPickerPanel':1,'langTranslatorBtn':1,'langTranslatingOverlay':1};
+
+// ── STATE ──
+var _panelOpen  = false;
+var _activeLang = null;
+// originalTexts: Map of {node -> original text} for reset
+var _originals  = [];   // array of {node, text}
+var _translated = false;
+var _translCache = {};  // langCode -> Map(text -> translatedText)
+
+// ── PANEL TOGGLE ──
+window.toggleLangPicker = function() {
+    _panelOpen = !_panelOpen;
+    document.getElementById('langPickerPanel').style.display = _panelOpen ? 'block' : 'none';
+};
+document.addEventListener('click', function(e) {
+    if (!_panelOpen) return;
+    var btn   = document.getElementById('langTranslatorBtn');
+    var panel = document.getElementById('langPickerPanel');
+    if (!btn.contains(e.target) && !panel.contains(e.target)) {
+        panel.style.display = 'none';
+        _panelOpen = false;
+    }
+});
+
+// ── COLLECT VISIBLE TEXT NODES ──
+function collectTextNodes(root) {
+    var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+        acceptNode: function(node) {
+            var txt = node.nodeValue || '';
+            if (!txt.trim()) return NodeFilter.FILTER_REJECT;
+            var p = node.parentElement;
+            if (!p) return NodeFilter.FILTER_REJECT;
+            // Skip certain tags
+            if (SKIP_TAGS[p.tagName]) return NodeFilter.FILTER_REJECT;
+            // Skip translator UI
+            var el = p;
+            while (el) {
+                if (SKIP_IDS[el.id]) return NodeFilter.FILTER_REJECT;
+                el = el.parentElement;
+            }
+            // Skip hidden elements
+            var style = window.getComputedStyle(p);
+            if (style.display === 'none' || style.visibility === 'hidden') return NodeFilter.FILTER_SKIP;
+            return NodeFilter.FILTER_ACCEPT;
+        }
+    }, false);
+    var nodes = [];
+    var n;
+    while ((n = walker.nextNode())) {
+        // only meaningful English-ish text (skip pure numbers/symbols/emojis)
+        var t = (n.nodeValue || '').trim();
+        if (t.length > 1 && /[a-zA-Z]/.test(t)) {
+            nodes.push(n);
+        }
+    }
+    return nodes;
+}
+
+// ── BATCH TRANSLATE via MyMemory ──
+// MyMemory allows up to 500 chars per request, free, no key needed
+function translateChunk(texts, langCode) {
+    // Join with delimiter unlikely to appear in content
+    var SEP  = ' ||| ';
+    var batch = texts.join(SEP);
+    // If too long, split in half recursively
+    if (batch.length > 490) {
+        var mid = Math.floor(texts.length / 2);
+        if (mid === 0) {
+            // Single text too long — truncate
+            batch = texts[0].substring(0, 490);
+        } else {
+            return Promise.all([
+                translateChunk(texts.slice(0, mid), langCode),
+                translateChunk(texts.slice(mid), langCode)
+            ]).then(function(parts) { return parts[0].concat(parts[1]); });
+        }
+    }
+    var url = 'https://api.mymemory.translated.net/get?q=' +
+              encodeURIComponent(batch) +
+              '&langpair=en|' + langCode;
+    return fetch(url)
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            var translated = (data.responseData && data.responseData.translatedText) || batch;
+            // Split back
+            var parts = translated.split(SEP);
+            // Pad if mismatch
+            while (parts.length < texts.length) parts.push(texts[parts.length] || '');
+            return parts.slice(0, texts.length);
+        })
+        .catch(function() { return texts; }); // fallback to original on error
+}
+
+// ── MAIN TRANSLATE ──
+window.translatePageTo = function(langCode) {
+    if (_activeLang === langCode) {
+        // Already translated to this — close panel
+        document.getElementById('langPickerPanel').style.display = 'none';
+        _panelOpen = false;
+        return;
+    }
+
+    // Update UI active state
+    document.querySelectorAll('.lang-btn').forEach(function(b) {
+        b.classList.toggle('active', b.getAttribute('data-lang') === langCode);
+    });
+    _activeLang = langCode;
+    document.getElementById('langPickerPanel').style.display = 'none';
+    _panelOpen = false;
+
+    // If we previously translated, reset first
+    if (_translated) _restoreOriginals();
+
+    // Show loading overlay
+    var overlay = document.getElementById('langTranslatingOverlay');
+    var msg     = document.getElementById('langOverlayMsg');
+    overlay.style.display = 'flex';
+    msg.textContent = 'Translating to ' + (LANG_NAMES[langCode] || langCode) + '…';
+
+    // Collect text nodes
+    var nodes = collectTextNodes(document.body);
+    _originals = nodes.map(function(n) { return { node: n, text: n.nodeValue }; });
+
+    // Group into chunks of ~5 texts each (to stay under 500 chars)
+    var CHUNK = 5;
+    var chunks = [];
+    for (var i = 0; i < nodes.length; i += CHUNK) {
+        chunks.push(nodes.slice(i, i + CHUNK));
+    }
+
+    // Translate all chunks in parallel (but rate-limit: 3 at a time)
+    var results = new Array(nodes.length);
+    var chunkIndex = 0;
+
+    function nextBatch() {
+        var batch = chunks[chunkIndex];
+        if (!batch) return Promise.resolve();
+        var thisIndex = chunkIndex;
+        chunkIndex++;
+        var texts = batch.map(function(n) { return (n.nodeValue || '').trim(); });
+        return translateChunk(texts, langCode).then(function(translated) {
+            translated.forEach(function(t, j) {
+                results[thisIndex * CHUNK + j] = t;
+            });
+            // Update progress
+            msg.textContent = 'Translating… ' + Math.min(100, Math.round((chunkIndex / chunks.length) * 100)) + '%';
+        });
+    }
+
+    // Run 3 concurrent batches
+    var CONCURRENCY = 3;
+    var active = [];
+    function runNext() {
+        if (chunkIndex >= chunks.length) return Promise.resolve();
+        var p = nextBatch().then(runNext);
+        return p;
+    }
+    var runners = [];
+    for (var c = 0; c < Math.min(CONCURRENCY, chunks.length); c++) {
+        runners.push(runNext());
+    }
+
+    Promise.all(runners).then(function() {
+        // Apply translations to DOM
+        _originals.forEach(function(entry, idx) {
+            if (results[idx] && results[idx].trim()) {
+                entry.node.nodeValue = results[idx];
+            }
+        });
+        _translated = true;
+        overlay.style.display = 'none';
+        if (typeof showToast === 'function') {
+            showToast('🌐 ' + (LANG_NAMES[langCode] || langCode) + ' mein translate ho gaya!', '#ff6b35');
+        }
+    }).catch(function() {
+        overlay.style.display = 'none';
+        if (typeof showToast === 'function') showToast('❌ Translation failed. Internet check karein.', '#ff4444');
+    });
+};
+
+// ── RESTORE ORIGINALS ──
+function _restoreOriginals() {
+    _originals.forEach(function(entry) {
+        if (entry.node && entry.node.parentNode) {
+            entry.node.nodeValue = entry.text;
+        }
+    });
+    _originals  = [];
+    _translated = false;
+}
+
+window.resetPageLanguage = function() {
+    _restoreOriginals();
+    _activeLang = null;
+    document.querySelectorAll('.lang-btn').forEach(function(b) { b.classList.remove('active'); });
+    document.getElementById('langPickerPanel').style.display = 'none';
+    _panelOpen = false;
+    if (typeof showToast === 'function') showToast('↩ English restore ho gaya', '#2c5a4a');
+};
+
+console.log('✅ [FEATURE v2] Indian Language Translator — DOM text node approach, MyMemory API, 8 languages');
+})();
+</script>
+<!-- ═══════════════════════════════ END TRANSLATOR v2 ══════════════ -->
+
 </body>
 </html>
 

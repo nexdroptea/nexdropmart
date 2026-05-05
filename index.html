@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- 🔒 SECURITY PATCH v2.9 applied | v41.2 AUDIT FIXES: [D-1] sellerHash dead code removed; [U-1] Guest cart login warning added; [X-1] esc() applied to 8 showToast p.name calls (XSS hardening) | v41.1 BUG FIX AUDIT below -->
+<!-- 🔒 SECURITY PATCH v2.9 applied | v41.4 BUG FIX AUDIT: [C-1] uploadB2BPhoto MIME validation added; [C-2] uploadExtraPhoto MIME+onerror+validCount fixed; [M-1] sbSaveBill order_id coercion consistent; [M-2] downloadOrderText textarea XSS fixed (innerHTML embed removed); [L-1] sbSaveProduct rating/rating_count in row; [L-4] settings.freeMin null fallback; [S-1] distLogin legacy distHash+sha256 dual-format support+auto-migrate; [S-2] distRegister hashPassword+email validation; [S-3] Seller session full Supabase restore | v41.3 FIXES below -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <!-- 🔒 FIX #6: X-Content-Type-Options prevents MIME sniffing attacks -->
@@ -209,10 +209,11 @@ const db = (function() {
 // Keys jo sirf device pe rahni chahiye — Supabase mein push NAHI honge
 // ✅ ONLY session, UI preference, aur device-specific keys yahan hain
 // Data keys (products, orders, users etc.) Supabase mein ZAROOR jayenge
-// ✅ rls_dismissed localStorage → sessionStorage mein move ho gaya (localStorage zero)
+// ✅ v41.1: rls_dismissed → sessionStorage se localStorage mein wapas (permanent dismiss chahiye)
 const _LOCAL_ONLY_KEYS = new Set([
     'nexdrop_user',         // current user session (device specific)
     'nexdrop_dark',         // dark mode preference (device specific)
+    'rls_dismissed',        // RLS warning permanently dismiss (UI preference)
 ]);
 function _isLocalOnly(key) {
     if(!key) return true;
@@ -401,7 +402,10 @@ async function sbSaveProduct(p) {
             courier_charge: p.courierCharge || 0,
             highlights: p.highlights || [],
             extra_images: p.extraImages || [],
-            price_unit: p.priceUnit || ''
+            price_unit: p.priceUnit || '',
+            // ✅ FIX L-1: rating aur rating_count INSERT mein include karo (save nahi ho raha tha)
+            rating: p.rating || 0,
+            rating_count: p.ratingCount || 0
         };
         if(row.image_value && row.image_value.length > 500000) {
             row.image_value = '🌾'; row.image_type = 'emoji';
@@ -539,9 +543,11 @@ async function sbSaveBill(bill) {
             customer_gstin: bill.customerGstin || '',
             customer_state: bill.customerState || ''
         };
-        const { data: existing, error: existErr } = await db.from('bills').select('id').eq('order_id', typeof bill.orderId === 'number' ? bill.orderId : parseInt(bill.orderId) || bill.orderId).maybeSingle();
+        // 🔒 FIX M-1: order_id coercion — SELECT aur UPDATE dono mein same coerced value use karo
+        const _coercedOId = typeof bill.orderId === 'number' ? bill.orderId : parseInt(bill.orderId) || bill.orderId;
+        const { data: existing, error: existErr } = await db.from('bills').select('id').eq('order_id', _coercedOId).maybeSingle();
         if (existing && !existErr) {
-            await db.from('bills').update(row).eq('order_id', bill.orderId);
+            await db.from('bills').update(row).eq('order_id', _coercedOId);
         } else {
             await db.from('bills').insert([row]);
         }
@@ -950,6 +956,8 @@ async function initSupabase() {
             let s = typeof settingsRes.value === 'string' ? JSON.parse(settingsRes.value) : settingsRes.value;
             if(s && typeof s === 'object') {
                 settings = { ...settings, ...s };
+                // ✅ FIX L-4: freeMin null/0 edge case — default 999 preserve karo
+                if(!settings.freeMin) settings.freeMin = 999;
                 delete settings.adminPassword;
                 /* settings saved via Supabase */
                 console.log('✅ App settings Supabase se load hue!');
@@ -4083,9 +4091,9 @@ body.dark-mode .nav-links { background: #121a18 !important; }
     Enable RLS policies on <strong>products, orders, users, bills, coupons, settings</strong> tables in your Supabase dashboard — otherwise anyone can read/write your data.<br>
     <a href="https://supabase.com/docs/guides/auth/row-level-security" target="_blank" style="color:#1565c0;font-weight:600;">📖 Supabase RLS Guide →</a>
   </div>
-  <button onclick="document.getElementById('rlsWarningBanner').style.display='none';sessionStorage.setItem('rls_dismissed','1');" style="background:none;border:none;font-size:1rem;cursor:pointer;color:#888;flex-shrink:0;" title="Dismiss">✕</button>
+  <button onclick="document.getElementById('rlsWarningBanner').style.display='none';localStorage.setItem('rls_dismissed','1');" style="background:none;border:none;font-size:1rem;cursor:pointer;color:#888;flex-shrink:0;" title="Dismiss">✕</button>
 </div>
-<script>if(sessionStorage.getItem('rls_dismissed')==='1'){var b=document.getElementById('rlsWarningBanner');if(b)b.style.display='none';}</script>
+<script>if(localStorage.getItem('rls_dismissed')==='1'){var b=document.getElementById('rlsWarningBanner');if(b)b.style.display='none';}</script>
 
 <div class="admin-stats">
 <div class="stat-card"><div class="stat-number" id="statProducts">0</div><div>Products</div></div>
@@ -5928,6 +5936,25 @@ function updateStats() {
         };
 
         container.innerHTML = html;
+
+        // ✅ FIX v41.1: statRetailStock ko category breakdown se sync karo
+        // Pehle calculateda retailStock = ALL products (orphan bhi), but category cards
+        // sirf known categories dikhate hain → mismatch hota tha
+        // Ab: stat card = categorized retail + orphan retail (matches jo user dekh sakta hai)
+        let catRetailTotal = 0;
+        baseNames.forEach(function(baseName) {
+            let retailCatName = 'Retail ' + baseName;
+            catRetailTotal += products.reduce(function(s,p) {
+                let pc = normCat(p.category);
+                return (pc === normCat(retailCatName) || pc === normCat(baseName)) ? s + (p.stockQty||0) : s;
+            }, 0);
+        });
+        catRetailTotal += uncatRetail; // "Other" cleanup card ka stock bhi add karo
+        setEl2('statRetailStock', catRetailTotal);
+        // Total stock bhi re-sync karo
+        let b2bStockFresh = b2bProducts.reduce(function(s,p){ return s + (p.stockQty||0); }, 0);
+        setEl2('statTotalStock', catRetailTotal + b2bStockFresh);
+
     })();
     // Original updateStats code follows:
     if(document.getElementById('statProducts')) document.getElementById('statProducts').innerText = products.length;
@@ -6574,9 +6601,26 @@ function uploadExtraPhoto(type, id, input) {
     if(!p) return;
     if(!p.extraImages) p.extraImages = [];
 
-    let processed = 0;
+    // 🔒 FIX C-2: MIME check + img.onerror + reader.onerror + validCount tracking (was missing — silent failures)
+    let processed = 0, validCount = 0;
+    const _allowedExtraTypes = ['image/jpeg','image/png','image/webp','image/gif'];
+    function _extraCheckDone() {
+        if(processed < files.length) return;
+        if(validCount > 0) {
+            if(type === 'b2b') { saveB2B(); loadAdminB2B(); displayB2B(); }
+            else { saveProducts(); loadAdminProducts(); displayProducts(); }
+            showToast('✅ '+validCount+' photo(s) uploaded successfully!');
+            renderExtraImgPreview(type, id);
+        } else if(files.length > 0) {
+            showToast('❌ Koi bhi valid image upload nahi hui.', '#ff4444');
+        }
+    }
     files.forEach(file => {
-        if(file.size > 10*1024*1024) { showToast('❌ '+file.name+' is too large! Max 10MB.','#ff4444'); processed++; return; }
+        if(!_allowedExtraTypes.includes(file.type)) {
+            showToast('❌ '+file.name+' — sirf image files allowed hain (JPG, PNG, WEBP, GIF)!','#ff4444');
+            processed++; _extraCheckDone(); return;
+        }
+        if(file.size > 10*1024*1024) { showToast('❌ '+file.name+' is too large! Max 10MB.','#ff4444'); processed++; _extraCheckDone(); return; }
         let reader = new FileReader();
         reader.onload = function(e) {
             let img = new Image();
@@ -6594,17 +6638,15 @@ function uploadExtraPhoto(type, id, input) {
                 } else {
                     if(p.extraImages.length < 5) p.extraImages.push(dataUrl);
                 }
-                processed++;
-                if(processed === files.length) {
-                    if(type === 'b2b') { saveB2B(); loadAdminB2B(); displayB2B(); }
-                    else { saveProducts(); loadAdminProducts(); displayProducts(); }
-                    showToast('✅ '+files.length+' photo(s) uploaded successfully!');
-                    // Refresh the mini preview
-                    renderExtraImgPreview(type, id);
-                }
+                validCount++; processed++; _extraCheckDone();
+            };
+            img.onerror = function() {
+                showToast('❌ '+file.name+' load nahi ho saki. Valid image file use karein.', '#ff4444');
+                processed++; _extraCheckDone();
             };
             img.src = e.target.result;
         };
+        reader.onerror = function() { processed++; _extraCheckDone(); };
         reader.readAsDataURL(file);
     });
 }
@@ -8819,6 +8861,9 @@ function loadAdminB2B() {
 function uploadB2BPhoto(id, input) {
     let file = input.files[0];
     if(!file) return;
+    // 🔒 FIX C-1: MIME type validation — sirf images allow karo (was missing, uploadAdminPhoto mein tha)
+    const allowedTypes = ['image/jpeg','image/png','image/webp','image/gif'];
+    if(!allowedTypes.includes(file.type)) { showToast('❌ Sirf image files allowed hain (JPG, PNG, WEBP, GIF)!', '#ff4444'); input.value=''; return; }
     if(file.size > 10*1024*1024) { showToast('❌ File bahut badi hai! Max 10MB allowed hai.', '#ff4444'); return; }
     let imgCell = document.getElementById('b2bImgCell_' + id);
     if(imgCell) imgCell.innerHTML = '<div style="width:60px;height:60px;display:flex;align-items:center;justify-content:center;font-size:1.2rem;">⏳</div>';
@@ -10231,8 +10276,27 @@ function sellerContactAdmin() {
         if (sess) {
             const parsed = JSON.parse(sess);
             if (parsed && parsed.email) {
-                // Silently restore — full data fetch on dashboard open
+                // Temporarily set from session (fast)
                 currentSeller = parsed;
+                // ✅ FIX S-3: Full data Supabase se fetch karo — status, owner_name, city etc. sirf {id,email,shop_name} se nahi milta tha
+                db.from('sellers').select('*').eq('email', parsed.email).maybeSingle().then(function(r) {
+                    if(r && r.data && !r.error) {
+                        var _s = r.data;
+                        var safeS = {};
+                        Object.keys(_s).forEach(function(k) { if(k !== 'password_hash') safeS[k] = _s[k]; });
+                        currentSeller = safeS;
+                        // Session ko fresh data se update karo
+                        sessionStorage.setItem('nexdrop_seller_session', JSON.stringify({ id: safeS.id, email: safeS.email, shop_name: safeS.shop_name }));
+                        console.log('✅ Seller session fully restored:', safeS.email, '| Status:', safeS.status);
+                    } else {
+                        // Account deleted ya banned — session clear karo
+                        currentSeller = null;
+                        sessionStorage.removeItem('nexdrop_seller_session');
+                    }
+                }).catch(function() {
+                    // Network error — partial session data se chalao
+                    console.log('Seller session: Supabase fetch failed, using cached session data.');
+                });
             }
         }
     } catch(e) {}
@@ -10575,9 +10639,19 @@ function buildStockCard(p, isB2B, accentColor) {
 function adjustStockV2(prefix, id, delta) {
     let el = document.getElementById('smv2_' + prefix + '_' + id);
     if(!el) return;
-    let newQty = Math.max(0, (parseInt(el.value) || 0) + delta);
+    let prevQty = parseInt(el.value) || 0;
+    let newQty = Math.max(0, prevQty + delta);
     el.value = newQty;
-    el.style.borderColor = newQty === 0 ? '#ff4444' : newQty <= 10 ? '#ff9800' : '#4caf50';
+    // ✅ FIX v42: per-product reorder level for color (was hardcoded 10)
+    let isB2B = prefix === 'b2b';
+    let rl = (typeof _getReorderLevelSync === 'function') ? _getReorderLevelSync(id, isB2B) : 10;
+    el.style.borderColor = newQty === 0 ? '#ff4444' : newQty <= rl ? '#ff9800' : '#4caf50';
+    // ✅ FIX v42: Ledger entry add karo (was missing for stock manager +/- buttons)
+    if(typeof _addLedgerEntry === 'function') {
+        let arr = isB2B ? b2bProducts : products;
+        let p = arr.find(p => p.id === id);
+        if(p && delta !== 0) _addLedgerEntry(id, p.name, isB2B, delta > 0 ? 'add' : 'deduct', delta, newQty, 'Stock Manager ' + (delta > 0 ? '+' : '') + delta);
+    }
     // 🔒 FIX: Unsaved changes banner dikhao
     _showStockUnsavedBanner();
     // Live update dashboard totals
@@ -10760,7 +10834,7 @@ function loadStockManager() {
     // ── Stock summary box ──
     let allProds = [...products, ...b2bProducts];
     let inStockCount  = allProds.filter(p => p.inStock).length;
-    let lowStockCount = allProds.filter(p => p.stockQty != null && p.stockQty > 0 && p.stockQty <= getReorderLevel(p.id, b2bProducts.some(b=>b.id===p.id))).length;
+    let lowStockCount = allProds.filter(p => p.stockQty != null && p.stockQty > 0 && p.stockQty <= _getReorderLevelSync(p.id, b2bProducts.some(b=>b.id===p.id))).length; // ✅ FIX v42: async→sync
     let outStockCount = allProds.filter(p => p.stockQty === 0).length;
     let summaryEl = document.getElementById('stockSummary');
     if(summaryEl) summaryEl.innerHTML = `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:0.6rem;">
@@ -10782,7 +10856,15 @@ function saveDynStockSection(catName, isB2B) {
         let pCat = (p.category||'').trim();
         if(pCat !== catName) return;
         let el = document.getElementById('smv2_' + prefix + '_' + p.id);
-        if(el) { p.stockQty = Math.max(0, parseInt(el.value)||0); p.inStock = p.stockQty > 0; changed++; }
+        if(el) {
+            let prevQty = p.stockQty || 0;
+            let newQty = Math.max(0, parseInt(el.value)||0);
+            p.stockQty = newQty; p.inStock = newQty > 0; changed++;
+            // ✅ FIX v42: Ledger entry add karo (was missing)
+            if(typeof _addLedgerEntry === 'function' && newQty !== prevQty) {
+                _addLedgerEntry(p.id, p.name, isB2B, 'set', newQty - prevQty, newQty, 'Stock Manager Save');
+            }
+        }
     });
     if(isB2B) { saveB2B(); displayB2B(); if(typeof displayHomeProducts==='function') displayHomeProducts(); }
     else { saveProducts(); displayProducts(); }
@@ -11010,12 +11092,12 @@ function exportStockCSV() {
     if(!_adminVault.isLoggedIn()){showToast('⛔ Admin login required!','#c62828');return;}
     let rows = [['Type','Product Name','Category','Price (₹)','Stock Qty','Reorder Level','Status','HSN Code','GST %']];
     products.forEach(p => {
-        let rl = getReorderLevel(p.id, false);
+        let rl = _getReorderLevelSync(p.id, false); // ✅ FIX v42: async→sync
         let status = p.stockQty === 0 ? 'Out of Stock' : p.stockQty <= rl ? 'Low Stock' : 'OK';
         rows.push(['Retail', p.name, p.category||'', p.price, p.stockQty !== null ? p.stockQty : '', rl, status, p.hsnCode||'', p.gstSlab||'']);
     });
     b2bProducts.forEach(p => {
-        let rl = getReorderLevel(p.id, true);
+        let rl = _getReorderLevelSync(p.id, true); // ✅ FIX v42: async→sync
         let status = p.stockQty === 0 ? 'Out of Stock' : p.stockQty <= rl ? 'Low Stock' : 'OK';
         rows.push(['Wholesale', p.name, p.category||'', p.price, p.stockQty !== null ? p.stockQty : '', rl, status, p.hsnCode||'', p.gstSlab||'']);
     });
@@ -11147,7 +11229,7 @@ function openStockValuation() {
         grandRetailVal += retailVal;
         if(costVal !== null) grandCostVal += costVal;
         let typeLabel = p._isB2B ? '🏭' : '🛒';
-        let qtyColor = qty === 0 ? '#ff4444' : qty <= getReorderLevel(p.id, p._isB2B) ? '#ff9800' : '#2c5a4a';
+        let qtyColor = qty === 0 ? '#ff4444' : qty <= _getReorderLevelSync(p.id, p._isB2B) ? '#ff9800' : '#2c5a4a'; // ✅ FIX v42: async→sync
         return `<tr style="border-bottom:1px solid #f5f5f5;">
             <td style="padding:0.4rem 0.5rem;font-size:0.72rem;">${typeLabel} ${esc(p.name)}</td>
             <td style="padding:0.4rem 0.5rem;font-size:0.72rem;color:#888;">${esc(p.category||'—')}</td>
@@ -12097,7 +12179,7 @@ function refreshStockDashboard() {
     </div>`;
     // Individual product mini-cards
     for(let item of allItems) {
-        let rl = (typeof getReorderLevel === 'function') ? getReorderLevel(item.id, item.type === 'b2b') : 10;
+        let rl = (typeof _getReorderLevelSync === 'function') ? _getReorderLevelSync(item.id, item.type === 'b2b') : 10; // ✅ FIX v42: async→sync
         let color = item.qty === 0 ? '#ffcccc' : item.qty <= rl ? '#fff3e0' : '#e8f5e9';
         let tcolor = item.qty === 0 ? '#ff4444' : item.qty <= rl ? '#ff9800' : '#2c5a4a';
         let badge = item.qty === 0 ? '❌' : item.qty <= Math.ceil(rl/2) ? '🔥' : item.qty <= rl ? '⚠️' : '✅';
@@ -14947,8 +15029,17 @@ function removeCategoryTag(i) {
 
     // ✅ FIX: Us category ke saare products bhi delete karo (retail + b2b dono se)
     // Taaki dashboard mein "Other" card na aaye
+    // ✅ FIX v42: bare baseName + "Retail X" + "Wholesale X" — teeno variants match karo
     let normRemoved = (removed||'').toLowerCase().trim();
-    let normMatch = function(cat) { return (cat||'').toLowerCase().trim() === normRemoved; };
+    // bare base name nikalo (strip Retail/Wholesale prefix)
+    let normBase = normRemoved.replace(/^retail\s+/,'').replace(/^wholesale\s+/,'').trim();
+    let normMatch = function(cat) {
+        let nc = (cat||'').toLowerCase().trim();
+        return nc === normRemoved ||
+               nc === normBase ||
+               nc === 'retail ' + normBase ||
+               nc === 'wholesale ' + normBase;
+    };
 
     if(typeof products !== 'undefined') {
         let delIds = products.filter(p => normMatch(p.category)).map(p => p.id);
@@ -16650,12 +16741,20 @@ async function distRegister() {
     }
     if (pass !== pass2) { showToast('❌ Passwords match nahi kar rahe.', '#c62828'); return; }
     if (pass.length < 6) { showToast('⚠️ Password kam se kam 6 characters ka hona chahiye.', '#e67e22'); return; }
+    // ✅ FIX S-2: Email format validation (was missing, seller portal mein tha)
+    if (!email.includes('@')) { showToast('❌ Valid email address dalein.', '#e67e22'); return; }
 
     // Check duplicate
     const existing = await sbDistGetByEmail(email);
     if (existing) { showToast('⚠️ Is email se pehle se account registered hai. Login karo.', '#e67e22'); return; }
 
-    const hash = await distHash(pass);
+    // ✅ FIX S-2: hashPassword use karo (distHash raw hex deta tha — doDistForgotPassword ke sha256: prefix se mismatch hota tha)
+    let hash;
+    try {
+        hash = await hashPassword(pass);
+    } catch(e) {
+        showToast('❌ Password hashing failed. HTTPS pe open karo ya browser check karo.', '#c62828'); return;
+    }
     const row = {
         name, business_name: business, phone, email,
         city, state, distributor_type: type,
@@ -16721,8 +16820,29 @@ async function distLogin() {
     const dist = await sbDistGetByEmail(email);
     if (!dist) { _distLoginGuard.recordFail(); showToast('❌ This email is not registered.', '#c62828'); return; }
 
-    const hash = await distHash(pass);
-    if (dist.password_hash !== hash) {
+    // ✅ FIX S-1: verifyPassword use karo — legacy distHash (raw hex) + new hashPassword (sha256:) dono handle karo
+    // Problem: distRegister distHash (raw hex) use karta tha, doDistForgotPassword hashPassword (sha256:) use karta tha — mismatch!
+    if (!dist.password_hash) {
+        showToast('❌ Account mein password set nahi hai. Admin se contact karein.', '#c62828'); return;
+    }
+    let _distVerified = false;
+    if(dist.password_hash.startsWith('sha256:')) {
+        // New format (hashPassword) — verifyPassword use karo
+        _distVerified = await verifyPassword(pass, dist.password_hash).catch(() => false);
+    } else {
+        // Legacy format (distHash — raw hex, no sha256: prefix) — direct comparison
+        const _legacyHash = await distHash(pass).catch(() => '');
+        _distVerified = (_legacyHash === dist.password_hash && _legacyHash !== '');
+        if(_distVerified) {
+            // Auto-migrate to hashPassword format (sha256:) silently
+            try {
+                const _newHash = await hashPassword(pass);
+                await db.from('distributors').update({ password_hash: _newHash }).eq('email', dist.email);
+                console.log('✅ Dist password auto-migrated to sha256: format');
+            } catch(e) { console.log('Dist migration skipped:', e.message); }
+        }
+    }
+    if (!_distVerified) {
         _distLoginGuard.recordFail();
         showToast('❌ Incorrect password.', '#c62828');
         document.getElementById('distLoginPass').value = '';
@@ -19575,12 +19695,12 @@ console.log('✅ [PATCH v37.1] Cart persistence + User Panel orders + UPI modal 
 
         var text = lines.join('\n');
 
-        // Show share popup
+        // ✅ FIX M-2: Popup build karo without text in innerHTML — textarea.value separately set karo (XSS prevention)
         var popup = document.createElement('div');
         popup.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:99999;display:flex;align-items:center;justify-content:center;padding:1rem;';
         popup.innerHTML = '<div style="background:white;border-radius:18px;padding:1.3rem;width:100%;max-width:400px;">' +
             '<h4 style="color:#2c5a4a;margin-bottom:0.8rem;">📤 Share Order Receipt</h4>' +
-            '<textarea readonly style="width:100%;height:160px;padding:0.6rem;border:1px solid #ddd;border-radius:8px;font-size:0.72rem;font-family:monospace;resize:none;box-sizing:border-box;background:#f9f9f9;">' + text.replace(/</g,'&lt;') + '</textarea>' +
+            '<textarea readonly style="width:100%;height:160px;padding:0.6rem;border:1px solid #ddd;border-radius:8px;font-size:0.72rem;font-family:monospace;resize:none;box-sizing:border-box;background:#f9f9f9;"></textarea>' +
             '<div style="display:flex;gap:0.5rem;margin-top:0.7rem;">' +
                 '<button onclick="(function(){var t=this.closest(\'[style*=fixed]\');var ta=t.querySelector(\'textarea\');navigator.clipboard.writeText(ta.value).then(function(){showToast(\'📋 Copied!\',\'#2c5a4a\');});}).call(this)" style="flex:1;background:#2c5a4a;color:white;border:none;padding:0.55rem;border-radius:10px;font-weight:700;cursor:pointer;">📋 Copy</button>' +
                 '<button onclick="window.open(\'https://wa.me/?text=\'+encodeURIComponent(this.closest(\'[style*=fixed]\').querySelector(\'textarea\').value),\'_blank\')" style="flex:1;background:#25D366;color:white;border:none;padding:0.55rem;border-radius:10px;font-weight:700;cursor:pointer;">📤 WhatsApp</button>' +
@@ -19588,6 +19708,7 @@ console.log('✅ [PATCH v37.1] Cart persistence + User Panel orders + UPI modal 
             '</div>' +
         '</div>';
         document.body.appendChild(popup);
+        popup.querySelector('textarea').value = text;  // ✅ Safe assignment — no innerHTML injection
     };
 })();
 
@@ -19618,6 +19739,7 @@ document.addEventListener('DOMContentLoaded', function() {
     }, 700);
 });
 
+console.log('✅ [v41.4] ALL AUDIT FIXES: [C-1] uploadB2BPhoto MIME check; [C-2] uploadExtraPhoto MIME+onerror+validCount; [M-1] sbSaveBill order_id coercion; [M-2] downloadOrderText XSS (textarea.value); [L-1] sbSaveProduct rating+rating_count; [L-4] freeMin null fallback; [S-1] distLogin dual-hash+auto-migrate; [S-2] distRegister hashPassword+email-validation; [S-3] Seller full session restore from Supabase');
 console.log('✅ [v41.3] Seller + Distributor Forgot Password: showSellerForgot/doSellerForgotPassword + showDistForgot/doDistForgotPassword — email+phone verify, hashPassword, Supabase update; closeSellerLogin/closeDistributorLogin reset form state');
 console.log('✅ [v41.1] BUG FIX AUDIT: [M-1] doForgotPassword brute force guard added (_userLoginGuard.isLocked + recordFail); [M-2] name-based order match removed (6 locations — privacy leak fix); [M-3] _userLoginGuard declaration moved before usage (TDZ safety); [M-4] settings.adminUsername leak removed; [M-5] users[].password in-memory sync removed; [L-2] setInterval max retry ×4 (patchWL/OA/Notif/CH); [C-3] unsafe-eval removed from CSP');
 console.log('✅ [v41.0] SECURITY AUDIT FIXES: [C1] User login brute force (_userLoginGuard 5 fail→5min lockout); [C3] Seller portal sellerHash→hashPassword/verifyPassword (salted SHA-256); [H1] Carousel esc(p.name) XSS fix; [H3] exportUsersOnly password strip; [M1] safeSave error surfacing; [M2] adminDistWhatsApp helper (XSS-safe); [M5] SW registration improved (try /sw.js first)');
